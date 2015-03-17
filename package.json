@@ -1,0 +1,36 @@
+{
+  "name": "console-ls",
+  "version": "0.0.1",
+  "description": "Inspect and search instances more effectively in the developer console",
+  "main": "ls.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nickyout/console-ls.git"
+  },
+  "keywords": [
+    "console",
+    "ls",
+    "inspect",
+    "object",
+    "instance"
+  ],
+  "author": "Nicky Out",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nickyout/console-ls/issues"
+  },
+  "homepage": "https://github.com/nickyout/console-ls",
+  "dependencies": {
+    "lodash.isarray": "^3.0.0",
+    "lodash.isobject": "^3.0.0",
+    "lodash.isplainobject": "^3.0.0",
+    "tiny-sprintf": "^0.3.0"
+  },
+  "devDependencies": {
+    "browserify": "^9.0.3",
+    "uglify-js": "^2.4.17"
+  }
+}
