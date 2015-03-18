@@ -5,57 +5,7 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	regFnIsClass = /^[A-Z]/,
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
 	defaultKeys = ["kind", "name", "value"],
-	columns = {
-		index: {
-			index: 1
-		},
-		name: {
-			index: 2
-		},
-		value: {
-			index: 3
-		},
-		type: {
-			index: 4
-		},
-		kind: {
-			index: 5
-		},
-		isPrivate: {
-			index: 6
-		},
-		className: {
-			index: 7
-		},
-		isCircular: {
-			index: 8
-		}
-	},
-	keys = Object.keys(columns),
-	docs = {
-		"1 ls(target, {...Object} options)": "Standard invocation",
-		"1 ls(target, {Number} arg)": "Alias for options = { r: arg }",
-		"1 ls(target, {String|RegExp} arg)": "Alias for options = { grep: arg }",
-		"2 ls": {
-			"help(options)": "{Function} ls with target = docs",
-			"find(target, options)": "{Function} ls with options = { r: 0, show: 'name' }",
-			"a(target, options)": "{Function} ls with options = { showPrivate: true }",
-			"namePrefix": "{String} all property name paths are preceded by this string",
-			"nameSep": "{String} name path separator string for recursive search results",
-			"maxWidth": "{Number} maximum output width. If >0 cut off on the right, if <0 on the left",
-			"maxWidthChar": "{String} placed at the point where output is cut off",
-			"maxRows": "{Number} limit number of output rows. If >0 display from start, if <0 display from end",
-			"q": "{Boolean} If true, only the result is printed (without headers etc)"
-		},
-		"3 options": {
-			"r": "{Number|Boolean} recursive depth. <1 or true means no limit.",
-			"grep": "{String|RegExp} print lines that contain this",
-			"filter": "{Object.<String|RegExp>|String|RegExp} filter by column value. Key is column label.",
-			"show": "{String|Array.<String>} show only these columns, or use \"all\" to show all",
-			"showPrivate": "{Boolean} whether or not to display private properties, starting with a \"_\"",
-			"sort": "{String|<Array.<String>} sort A-z by column values. Prepend with \"-\" for z-A"
-		}
-	};
+	columns = ['index','name','value','type','kind','isPrivate','className','isCircular'];
 
 var util = {
 
@@ -223,17 +173,10 @@ function printLine(el) {
 		force = options.force,
 		maxWidth = +ls.maxWidth,
 		maxWidthChar,
+		args = columns.map(function(key) { return el[key] }),
 		line;
-	line = sprintf(options.show,
-		el.index,
-		el.name,
-		el.value,
-		el.type,
-		el.kind,
-		el.isPrivate,
-		el.className,
-		el.isCircular
-	);
+	args.unshift(options.show);
+	line = sprintf.apply(null, args); 
 	if (maxWidth && line.length > Math.abs(maxWidth)) {
 		maxWidthChar = '' + ls.maxWidthChar;
 		line = maxWidth > 0 ? line.substr(0, maxWidth - maxWidthChar.length) + maxWidthChar: maxWidthChar + line.substr(maxWidth + maxWidthChar.length);
@@ -311,7 +254,7 @@ function createColumnsDef(arr, columnWidths) {
 	while (key = arr[i++]) {
 		// nonzero
 		width = Math.max(columnWidths[key], key.length);
-		index = columns[key].index;
+		index = columns.indexOf(key)+1;
 		columnDef.sprintf[key] = "%"+index+"$-"+width+"s";
 		columnDef.label[key] = key;
 		columnDef.sep[key] = sprintf("%'-"+width+"s", '');
@@ -466,12 +409,12 @@ function ls(target) {
 	if (!options.hasOwnProperty('show')) {
 		options.show = defaultKeys.slice();
 	} else if (options.show === "all") {
-		options.show = keys.slice();
+		options.show = columns.slice();
 	} else {
 		if (!util.isArray(options.show)) {
 			options.show = [options.show];
 		}
-		options.show = util.intersection(options.show, keys);
+		options.show = util.intersection(options.show, columns);
 		if (options.show.length == 0) {
 			options.show = defaultKeys.slice();
 		}
@@ -518,7 +461,7 @@ function ls(target) {
 
 	// Print
 	options.force = true;
-	if (!ls.q) {
+	if (!ls.quiet) {
 		fnPrintLine(columnsDef.label);
 		fnPrintLine(columnsDef.sep);
 	}
@@ -526,7 +469,7 @@ function ls(target) {
 	rowsToPrint.forEach(fnPrintLine);
 
 	// If subset, end message
-	if (!ls.q && (rowStart || rowEnd)) {
+	if (!ls.quiet && (rowStart || rowEnd)) {
 		console.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
 	}
 
@@ -576,15 +519,11 @@ ls.maxWidthChar = '..';
  * If true, only the result is printed (no headers etc).
  * @type {boolean}
  */
-ls.q = false;
+ls.quiet = false;
 
 function lsShortcut(target, options, args, from) {
 	ls.apply(ls, [target, options].concat(Array.prototype.slice.call(args, from || 0)));
 }
-
-ls.help = function() {
-	lsShortcut(docs, { r: 0, show: ["name", "value"], filter: { "type": "String" } }, arguments);
-};
 
 ls.find = function(target) {
 	lsShortcut(target, { r: 0, show: 'name', sort: 'name' }, arguments, 1);
