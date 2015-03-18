@@ -35,11 +35,11 @@ function typeOf(value) {
 /* ls utils */
 
 function getPropertyDescriptions(target, namePrefix, depth, descr, blackList) {
-	typeof depth === "number" || (depth = 1);
 	namePrefix || (namePrefix = '');
 	descr || (descr = []);
 	blackList || (blackList = []);
-	var owner,
+	var lsConfig = ls.c,
+		owner,
 		ownerDepth,
 		ownerCtorName,
 		kind,
@@ -60,7 +60,7 @@ function getPropertyDescriptions(target, namePrefix, depth, descr, blackList) {
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
 		value = target[name];
-		kind = ls._defineKind(value, name, target);
+		kind = lsConfig.defineKind(value, name, target);
 		isCircular = blackList.indexOf(value) !== -1;
 		descr.push({
 			index: descr.length,
@@ -76,7 +76,7 @@ function getPropertyDescriptions(target, namePrefix, depth, descr, blackList) {
 			className: ownerCtorName
 		});
 		if (depth !== 1 && !isCircular) {
-			getPropertyDescriptions(value, namePrefix + name + ls.nameSep, depth - 1, descr, blackList);
+			getPropertyDescriptions(value, namePrefix + name + lsConfig.nameSep, depth - 1, descr, blackList);
 		}
 	}
 	// Truncate elements added in the list during this loop
@@ -154,20 +154,21 @@ function getColumnWidths(keys, columnWidths, el) {
 function printLine(el) {
 	var options = this,
 		force = options.force,
-		maxWidth = +ls.maxWidth,
+		lsConfig = ls.c,
+		maxWidth = +lsConfig.maxWidth,
 		maxWidthChar,
 		args = columns.map(function(key) { return el[key] }),
 		line;
 	args.unshift(options.show);
 	line = sprintf.apply(null, args); 
 	if (maxWidth && line.length > Math.abs(maxWidth)) {
-		maxWidthChar = '' + ls.maxWidthChar;
+		maxWidthChar = '' + lsConfig.maxWidthChar;
 		line = maxWidth > 0 ? line.substr(0, maxWidth - maxWidthChar.length) + maxWidthChar: maxWidthChar + line.substr(maxWidth + maxWidthChar.length);
 	}
 	if (!force && options.grep && line.search(options.grep) === -1) {
 		return;
 	}
-	console.log(line);
+	lsConfig.log(line);
 }
 
 function arrToStr(arr, recurse, maxLength, prefix, fn) {
@@ -260,7 +261,7 @@ function createDisplayString(columnsToShow, columnDef) {
 		str = str.replace(/-\d+/, '');
 		arr[arr.length-1] = str;
 	}
-	return arr.join(ls.columnSep);
+	return arr.join(ls.c.columnSep);
 }
 
 /**
@@ -352,14 +353,15 @@ function ls(target) {
 		rowStart,
 		rowEnd,
 		fnPrintLine,
-		defaultOptions = ls.defaultOptions,
+		lsConfig = ls.c,
+		defaultOptions = lsConfig.defaultOptions,
 		options = mergeShallow({}, defaultOptions),
 		i = 0,
 		max = arguments.length,
 		arg,
 		columnsDef,
 		columnWidths = {},
-		maxRows = ls.maxRows;
+		maxRows = lsConfig.maxRows;
 	// Merge arguments into options
 	while (++i < max) {
 		arg = arguments[i];
@@ -400,7 +402,7 @@ function ls(target) {
 	}
 
 	// Sort all required descriptions
-	descr = getPropertyDescriptions(target, ls.namePrefix, options.r, []);
+	descr = getPropertyDescriptions(target, lsConfig.namePrefix, options.r, []);
 	descr = descr.filter(filterDescription.bind(options));
 	descr.sort(sortBy.bind(null, options.sort));
 
@@ -434,7 +436,7 @@ function ls(target) {
 
 	// Print
 	options.force = true;
-	if (!ls.quiet) {
+	if (!lsConfig.quiet) {
 		fnPrintLine(columnsDef.label);
 		fnPrintLine(columnsDef.sep);
 	}
@@ -442,89 +444,89 @@ function ls(target) {
 	rowsToPrint.forEach(fnPrintLine);
 
 	// If subset, end message
-	if (!ls.quiet && (rowStart || rowEnd)) {
-		console.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
+	if (!lsConfig.quiet && (rowStart || rowEnd)) {
+		lsConfig.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
 	}
 
 
 }
 
+ls.c = {
+	/**
+	 * Prefix used for name paths
+	 * @type {String}
+	 * @memberof module:console-ls
+	 */
+	namePrefix: '',
+	/**
+	 * Separator used for name paths
+	 * @type {String}
+	 * @memberof module:console-ls
+	 */
+	nameSep: '.',
+	/**
+	 * Separator between columns
+	 * @type {string}
+	 */
+	columnSep: '|',
+	/**
+	 * Set maximum output width in number of characters.
+	 * @type {number}
+	 */
+	maxWidth: 0,
+	/**
+	 * This character sequence is used at the place where an output line was cut off.
+	 * @type {string}
+	 * @see module:console-ls#maxWidth
+	 */
+	maxWidthChar: '..',
+	/**
+	 * Set maximum number of output rows.
+	 * @type {number}
+	 */
+	maxRows: 0,
+	/**
+	 * If true, only the result is printed (no headers etc).
+	 * @type {boolean}
+	 */
+	quiet: false,
+	/**
+	 * The default values of each option.
+	 * @type {Object}
+	 */
+	defaultOptions: {
+		show: ["kind", "name", "value"],
+		sort: ['-kind', 'name'],
+		filter: {},
+		showPrivate: false,
+		showFull: false,
+		showFullIndent: '  ',
+		r: 1,
+		grep: '' 
+	},
+	/**
+	 * Dictates how the value of "kind" gets interpreted
+	 * @param {*} value
+	 * @param {String} key
+	 * @param {Object|Array|Function|*} source
+	 */
+	defineKind: function(value, key, source) {
+		if (typeof value === "function") {
+			if (/^[A-Z]/.test(key)) {
+				return "class";
+			} else {
+				return "method";
+			}
+		} 
+		return "property";
+	},
 
-/**
- * Prefix used for name paths
- * @type {String}
- * @memberof module:console-ls
- */
-ls.namePrefix = '';
-
-/**
- * Separator used for name paths
- * @type {String}
- * @memberof module:console-ls
- */
-ls.nameSep = '.';
-
-/**
- * Separator between columns
- * @type {string}
- */
-ls.columnSep = '|';
-
-/**
- * Set maximum output width in number of characters.
- * @type {number}
- */
-ls.maxWidth = 0;
-
-/**
- * Set maximum number of output rows.
- * @type {number}
- */
-ls.maxRows = 0;
-
-/**
- * This character sequence is used at the place where an output line was cut off.
- * @type {string}
- * @see module:console-ls#maxWidth
- */
-ls.maxWidthChar = '..';
-
-/**
- * If true, only the result is printed (no headers etc).
- * @type {boolean}
- */
-ls.quiet = false;
-
-/**
- * The default values of each option.
- * @type {Object}
- */
-ls.defaultOptions = {
-	show: ["kind", "name", "value"],
-	sort: ['-kind', 'name'],
-	filter: {},
-	showPrivate: false,
-	showFull: false,
-	showFullIndent: '  ',
-	r: 1,
-	grep: '' 
+	log: console.log.bind(console)
 };
 
 ls._ = function(target, options, args) {
 	ls.apply(ls, [target, options].concat(Array.prototype.slice.call(args, 1)));
 };
-
-ls._defineKind = function(value, key, source) {
-	if (typeof value === "function") {
-		if (/^[A-Z]/.test(key)) {
-			return "class";
-		} else {
-			return "method";
-		}
-	} 
-	return "property";
-};
-
 
 ls.find = function(target) {
 	ls._(target, { r: 0, show: 'name', sort: 'name' }, arguments);
@@ -535,6 +537,6 @@ ls.a = function(target) {
 };
 
 ls.cat = function(value) {
-	console.log(getDisplayValue(value, { showFull: true, showFullIndent: '  ' }, -1));
+	ls.c.log(getDisplayValue(value, { showFull: true, showFullIndent: '  ' }, -1));
 }
 module.exports = ls;
