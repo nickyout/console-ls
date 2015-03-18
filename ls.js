@@ -4,7 +4,6 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	regFnArgSep = /\s*,\s*/,
 	regFnIsClass = /^[A-Z]/,
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
-	defaultKeys = ["kind", "name", "value"],
 	columns = ['index','name','value','type','kind','isPrivate','className','isCircular'];
 
 var util = {
@@ -15,6 +14,7 @@ var util = {
 		while (++i < keys.length) {
 			target[keys[i]] = source[keys[i]];
 		}
+		return target;
 	},
 
 	intersection: function(arr1, arr2) {
@@ -262,10 +262,11 @@ function createColumnsDef(arr, columnWidths) {
 	return columnDef;
 }
 
-function createDisplayString(arr, columnDef) {
+function createDisplayString(columnsToShow, columnDef) {
 	var i = -1,
 		showCol,
-		str;
+		str,
+		arr = columnsToShow.slice();
 	while (showCol = arr[++i]) {
 		arr[i] = columnDef.sprintf[showCol] || '';
 	}
@@ -366,7 +367,8 @@ function ls(target) {
 		rowStart,
 		rowEnd,
 		fnPrintLine,
-		options = {},
+		defaultOptions = ls.defaultOptions,
+		options = util.mergeShallow({}, defaultOptions),
 		i = 0,
 		max = arguments.length,
 		arg,
@@ -393,36 +395,22 @@ function ls(target) {
 		util.mergeShallow(options, arg);
 	}
 	// Interpret options
-	if (!options.hasOwnProperty('showPrivate')) {
-		options.showPrivate = false;
-	}
-	if (!options.hasOwnProperty('filter')) {
-		options.filter = {};
-	} else if (!util.isPlainObject(options.filter)) {
+	if (!util.isPlainObject(options.filter)) {
 		options.filter = { name: options.filter };
 	}
-	if (!options.hasOwnProperty('sort')){
-		options.sort = ['-kind', 'name'];
-	} else if (!util.isArray(options.sort)) {
+	if (!util.isArray(options.sort)) {
 		options.sort = [options.sort];
 	}
-	if (!options.hasOwnProperty('show')) {
-		options.show = defaultKeys.slice();
-	} else if (options.show === "all") {
+	if (options.show === "all") {
 		options.show = columns.slice();
 	} else {
 		if (!util.isArray(options.show)) {
 			options.show = [options.show];
 		}
 		options.show = util.intersection(options.show, columns);
-		if (options.show.length == 0) {
-			options.show = defaultKeys.slice();
-		}
 	}
 
-	if (!options.hasOwnProperty('r')) {
-		options.r = 1;
-	} else if (typeof options.r !== "number" && options.r) {
+	if (typeof options.r !== "number" && options.r) {
 		options.r = 0;
 	}
 
@@ -521,6 +509,14 @@ ls.maxWidthChar = '..';
  */
 ls.quiet = false;
 
+ls.defaultOptions = {
+	show: ["kind", "name", "value"],
+	sort: ['-kind', 'name'],
+	filter: {},
+	showPrivate: false,
+	r: 1,
+	grep: '' 
+};
 function lsShortcut(target, options, args, from) {
 	ls.apply(ls, [target, options].concat(Array.prototype.slice.call(args, from || 0)));
 }
