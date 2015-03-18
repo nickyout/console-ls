@@ -4,11 +4,15 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
 	columns = ['index','name','value','type','kind','isPrivate','className','isCircular'];
 
+var lsShortcuts = {};
+
 /* generic utils */
 
 var isObject = require('lodash.isobject'),
 	isArray = require('lodash.isarray'),
-	isPlainObject = require('lodash.isplainobject');
+	isPlainObject = function(value) {
+		return value && typeOf(value) === "Object";
+	}
 
 function mergeShallow(target, source) {
 	var keys = Object.keys(source),
@@ -161,12 +165,12 @@ function printLine(el) {
 		line;
 	args.unshift(options.show);
 	line = sprintf.apply(null, args); 
+	if (!force && options.grep && line.search(options.grep) === -1) {
+		return;
+	}
 	if (maxWidth && line.length > Math.abs(maxWidth)) {
 		maxWidthChar = '' + lsConfig.maxWidthChar;
 		line = maxWidth > 0 ? line.substr(0, maxWidth - maxWidthChar.length) + maxWidthChar: maxWidthChar + line.substr(maxWidth + maxWidthChar.length);
-	}
-	if (!force && options.grep && line.search(options.grep) === -1) {
-		return;
 	}
 	lsConfig.log(line);
 }
@@ -198,10 +202,19 @@ function getDisplayValue(value, options, recurse, blackList, prefix) {
 	prefix || (prefix = '');
 	var showFull = options.showFull,
 		maxLength = showFull ? 0 : 50,
-		indent = showFull && options.showFullIndent || '';
+		indent = showFull && options.showFullIndent || '',
+		str;
 	switch (typeof value) {
 		case "function":
-			return showFull ? '' + value : getFnHead(value);
+			if (showFull) {
+				str = '' + value;
+				if (!indent) {
+					str = str.replace(/\s*\n\s*/gm, ' ');
+				}
+			} else {
+				str = getFnHead(value);
+			}
+			return str;
 		case "string":
 			return '"' + value + '"';
 		case "object":
@@ -451,6 +464,46 @@ function ls(target) {
 
 }
 
+function lsCombo(arrOptions) {
+	return function(target) {
+		ls.apply(ls, [target].concat(arrOptions).concat(Array.prototype.slice.call(arguments, 1)));
+	}
+}
+
+function recursiveAdd(target, keys, arrOptions) {
+	var i = 0,
+		config,
+		arrOptionsName,
+		name;
+	while (name = keys[i++]) {
+		config = lsShortcuts[name];
+		if (arrOptions.indexOf(config) === -1) {
+			arrOptionsName = arrOptions.concat(config);
+			if (!target[name]) {
+				target[name] = lsCombo(arrOptionsName);
+			}
+			recursiveAdd(target[name], keys, arrOptionsName);
+		}
+	}
+}
+
+ls._add = function(key, options) {
+	var arr,
+		name, 
+		i = 0;
+	if (isObject(key)) {
+		arr = Object.keys(key);
+		while (name = arr[i++]) {
+			ls._add(name, key[name])
+		}
+	} else if (ls[key]) {
+		ls.c.log(sprintf("Property %s already exists", key));
+	} else {
+		lsShortcuts[key] = options;
+		recursiveAdd(ls, Object.keys(lsShortcuts), []);
+	}
+};
+
 ls.c = {
 	/**
 	 * Prefix used for name paths
@@ -500,7 +553,7 @@ ls.c = {
 		filter: {},
 		showPrivate: false,
 		showFull: false,
-		showFullIndent: '  ',
+		showFullIndent: '',
 		r: 1,
 		grep: '' 
 	},
@@ -524,19 +577,15 @@ ls.c = {
 	log: console.log.bind(console)
 };
 
-ls._ = function(target, options, args) {
-	ls.apply(ls, [target, options].concat(Array.prototype.slice.call(args, 1)));
-};
-
-ls.find = function(target) {
-	ls._(target, { r: 0, show: 'name', sort: 'name' }, arguments);
-};
-
-ls.a = function(target) {
-	ls._(target, { showPrivate: true }, arguments);
-};
+ls._add({
+	"find": { r: 0, show: 'name', sort: 'name' },
+	"a":	{ showPrivate: true },
+	"doc":	{ show: ['className', 'kind', 'name', 'type', 'value'], sort: ['className', '-kind', 'name'] },
+	"rgrep":{ r: 0, showFull: true }
+});
 
 ls.cat = function(value) {
 	ls.c.log(getDisplayValue(value, { showFull: true, showFullIndent: '  ' }, -1));
 }
+
 module.exports = ls;
