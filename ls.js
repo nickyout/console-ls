@@ -1,41 +1,40 @@
 "use strict";
 var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
-	regFnArgs = /^function\s*\((.*)\)\s*\{/,
-	regFnArgSep = /\s*,\s*/,
-	regFnIsClass = /^[A-Z]/,
+	regFnArgs = /(\([^)]*\))/,
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
 	columns = ['index','name','value','type','kind','isPrivate','className','isCircular'];
 
-var util = {
+/* generic utils */
 
-	mergeShallow: function(target, source) {
-		var keys = Object.keys(source),
-			i = -1;
-		while (++i < keys.length) {
-			target[keys[i]] = source[keys[i]];
+var isObject = require('lodash.isobject'),
+	isArray = require('lodash.isarray'),
+	isPlainObject = require('lodash.isplainobject');
+
+function mergeShallow(target, source) {
+	var keys = Object.keys(source),
+		i = -1;
+	while (++i < keys.length) {
+		target[keys[i]] = source[keys[i]];
+	}
+	return target;
+} 
+function intersection(arr1, arr2) {
+	var i=-1, returnArr = [];
+	while (++i < arr1.length) {
+		if (arr2.indexOf(arr1[i]) !== -1) {
+			returnArr.push(arr1[i]);
 		}
-		return target;
-	},
+	}
+	return returnArr;
+}
 
-	intersection: function(arr1, arr2) {
-		var i=-1, returnArr = [];
-		while (++i < arr1.length) {
-			if (arr2.indexOf(arr1[i]) !== -1) {
-				returnArr.push(arr1[i]);
-			}
-		}
-		return returnArr;
-	},
+function typeOf(value) {
+	return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || '';
+}
 
-	isObject: require('lodash.isobject'),
+/* ls utils */
 
-	isArray: require('lodash.isarray'),
-
-	isPlainObject: require('lodash.isplainobject')
-};
-
-
-function getDescription(target, namePrefix, depth, descr, blackList) {
+function getPropertyDescriptions(target, namePrefix, depth, descr, blackList) {
 	typeof depth === "number" || (depth = 1);
 	namePrefix || (namePrefix = '');
 	descr || (descr = []);
@@ -48,7 +47,7 @@ function getDescription(target, namePrefix, depth, descr, blackList) {
 		isCircular,
 		parent = descr[descr.length - 1],
 		previousBlackListLength = blackList.length;
-	if (!util.isObject(target)) {
+	if (!isObject(target)) {
 		return descr;
 	}
 	blackList.push(target);
@@ -61,17 +60,7 @@ function getDescription(target, namePrefix, depth, descr, blackList) {
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
 		value = target[name];
-		switch (typeof value) {
-			case "function":
-				if (regFnIsClass.test(name)) {
-					kind = "class";
-				} else {
-					kind = "method";
-				}
-				break;
-			default:
-				kind = "property";
-		}
+		kind = ls._defineKind(value, name, target);
 		isCircular = blackList.indexOf(value) !== -1;
 		descr.push({
 			index: descr.length,
@@ -87,7 +76,7 @@ function getDescription(target, namePrefix, depth, descr, blackList) {
 			className: ownerCtorName
 		});
 		if (depth !== 1 && !isCircular) {
-			getDescription(value, namePrefix + name + ls.nameSep, depth - 1, descr, blackList);
+			getPropertyDescriptions(value, namePrefix + name + ls.nameSep, depth - 1, descr, blackList);
 		}
 	}
 	// Truncate elements added in the list during this loop
@@ -95,16 +84,9 @@ function getDescription(target, namePrefix, depth, descr, blackList) {
 	return descr;
 }
 
-function typeOf(value) {
-	return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || '';
-}
-
-function getFnArgs(fn) {
+function getFnHead(fn) {
 	var fnMatch = (fn + '').match(regFnArgs);
-	if (!fnMatch) {
-		return '';
-	}
-	return fnMatch[1].split(regFnArgSep);
+	return 'function' + (fnMatch ? fnMatch[1] : '()');
 }
 
 
@@ -150,7 +132,7 @@ function filterDescription(el){
 	if (el.isCircular) {
 		displayValue = '[Circular]';
 	} else {
-		displayValue = getDisplayValue(el._value) + '';
+		displayValue = getDisplayValue(el._value, options, options.showFull ? -1 : 1) + '';
 	}
 
 	// Overwrites...
@@ -159,9 +141,10 @@ function filterDescription(el){
 }
 
 function getColumnWidths(keys, columnWidths, el) {
-	var i = 0, key, len;
+	var i = 0, key, len, val;
 	while (key = keys[i++]){
-		len = (el[key] + '').length;
+		val = (el[key] + '');
+		len = val.indexOf('\n') + 1 || val.length;
 		if (columnWidths[key] < len) {
 			columnWidths[key] = len;
 		}
@@ -185,13 +168,15 @@ function printLine(el) {
 		return;
 	}
 	console.log(line);
-
 }
 
-function arrToStr(arr, recurse, fn) {
+function arrToStr(arr, recurse, maxLength, prefix, fn) {
 	var str = '';
-	if (recurse > 0) {
+	if (recurse !== 0) {
 		arr.forEach(function(val, index) {
+			if (prefix) {
+				str += '\n' + prefix;
+			}
 			str += fn(val, index);
 		});
 		str = str.substr(0,Math.max(1, str.length - 1));
@@ -201,40 +186,40 @@ function arrToStr(arr, recurse, fn) {
 	} else {
 		str += "...";
 	}
-	if (str.length > 50) {
-		str = str.substr(0, 50 - 5) + '...';
+	if (maxLength && str.length > maxLength) {
+		str = str.substr(0, maxLength - 5) + '...';
 	}
 	return str;
 }
 
-function getDisplayValue(value, recurse) {
-	var str;
-	if (typeof recurse === "undefined") {
-		recurse = 1;
-	}
+function getDisplayValue(value, options, recurse, blackList, prefix) {
+	blackList || (blackList = []);
+	prefix || (prefix = '');
+	var showFull = options.showFull,
+		maxLength = showFull ? 0 : 50,
+		indent = showFull && options.showFullIndent || '';
 	switch (typeof value) {
 		case "function":
-			return 'function(' + getFnArgs(value) + ')';
+			return showFull ? '' + value : getFnHead(value);
 		case "string":
 			return '"' + value + '"';
 		case "object":
+			if (blackList.indexOf(value) !== -1) {
+				return "[Circular]";
+			}
+			blackList.push(value);
 			// Showing array contents
-			if (util.isArray(value)) {
-				str = '[';
-				str += arrToStr(value, recurse, function(val) {
-					return sprintf(" %s,", getDisplayValue(val, recurse-1));
-				});
-				return str+ "]";
+			if (isArray(value)) {
+				return '[' + arrToStr(value, recurse, maxLength, prefix + indent, function(val) {
+					return sprintf(" %s,", getDisplayValue(val, options, recurse-1, blackList, prefix + indent));
+				}) + (showFull ? '\n' + prefix : '') + ']';
 			}
 			// Showing object contents
-			if (util.isPlainObject(value)) {
-				str = "{";
-				str += arrToStr(Object.keys(value), recurse, function(key) {
-					return sprintf(" %s: %s,", key, getDisplayValue(value[key], recurse-1));
-				});
-				return str+ "}";
+			if (isPlainObject(value)) {
+				return '{' + arrToStr(Object.keys(value), recurse, maxLength, prefix + indent, function(key) {
+					return sprintf(" %s: %s,", key, getDisplayValue(value[key], options, recurse-1, blackList, prefix + indent));
+				}) + (showFull ? '\n' + prefix : '')+ "}";
 			}
-			return value;
 		default:
 			return value;
 	}
@@ -368,7 +353,7 @@ function ls(target) {
 		rowEnd,
 		fnPrintLine,
 		defaultOptions = ls.defaultOptions,
-		options = util.mergeShallow({}, defaultOptions),
+		options = mergeShallow({}, defaultOptions),
 		i = 0,
 		max = arguments.length,
 		arg,
@@ -378,7 +363,7 @@ function ls(target) {
 	// Merge arguments into options
 	while (++i < max) {
 		arg = arguments[i];
-		if (!util.isPlainObject(arg)) {
+		if (!isPlainObject(arg)) {
 			// Shortcuts:
 			switch (typeOf(arg)) {
 				// options as grep
@@ -392,22 +377,22 @@ function ls(target) {
 					break;
 			}
 		}
-		util.mergeShallow(options, arg);
+		mergeShallow(options, arg);
 	}
 	// Interpret options
-	if (!util.isPlainObject(options.filter)) {
+	if (!isPlainObject(options.filter)) {
 		options.filter = { name: options.filter };
 	}
-	if (!util.isArray(options.sort)) {
+	if (!isArray(options.sort)) {
 		options.sort = [options.sort];
 	}
 	if (options.show === "all") {
 		options.show = columns.slice();
 	} else {
-		if (!util.isArray(options.show)) {
+		if (!isArray(options.show)) {
 			options.show = [options.show];
 		}
-		options.show = util.intersection(options.show, columns);
+		options.show = intersection(options.show, columns);
 	}
 
 	if (typeof options.r !== "number" && options.r) {
@@ -415,7 +400,7 @@ function ls(target) {
 	}
 
 	// Sort all required descriptions
-	descr = getDescription(target, ls.namePrefix, options.r, []);
+	descr = getPropertyDescriptions(target, ls.namePrefix, options.r, []);
 	descr = descr.filter(filterDescription.bind(options));
 	descr.sort(sortBy.bind(null, options.sort));
 
@@ -464,6 +449,7 @@ function ls(target) {
 
 }
 
+
 /**
  * Prefix used for name paths
  * @type {String}
@@ -509,24 +495,46 @@ ls.maxWidthChar = '..';
  */
 ls.quiet = false;
 
+/**
+ * The default values of each option.
+ * @type {Object}
+ */
 ls.defaultOptions = {
 	show: ["kind", "name", "value"],
 	sort: ['-kind', 'name'],
 	filter: {},
 	showPrivate: false,
+	showFull: false,
+	showFullIndent: '  ',
 	r: 1,
 	grep: '' 
 };
-function lsShortcut(target, options, args, from) {
-	ls.apply(ls, [target, options].concat(Array.prototype.slice.call(args, from || 0)));
-}
+
+ls._ = function(target, options, args) {
+	ls.apply(ls, [target, options].concat(Array.prototype.slice.call(args, 1)));
+};
+
+ls._defineKind = function(value, key, source) {
+	if (typeof value === "function") {
+		if (/^[A-Z]/.test(key)) {
+			return "class";
+		} else {
+			return "method";
+		}
+	} 
+	return "property";
+};
+
 
 ls.find = function(target) {
-	lsShortcut(target, { r: 0, show: 'name', sort: 'name' }, arguments, 1);
+	ls._(target, { r: 0, show: 'name', sort: 'name' }, arguments);
 };
 
 ls.a = function(target) {
-	lsShortcut(target, { showPrivate: true }, arguments, 1);
+	ls._(target, { showPrivate: true }, arguments);
 };
 
+ls.cat = function(value) {
+	console.log(getDisplayValue(value, { showFull: true, showFullIndent: '  ' }, -1));
+}
 module.exports = ls;
