@@ -1,61 +1,70 @@
 "use strict";
 var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
-	regFnArgs = /(\([^)]*\))/,
-	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
-	columns = ['index','name','value','type','kind','isPrivate','className','isCircular'];
-
-var lsShortcuts = {};
-
-/* generic utils */
-
-var isObject = require('lodash.isobject'),
+	isObject = require('lodash.isobject'),
 	isArray = require('lodash.isarray'),
 	isPlainObject = function(value) {
 		return value && typeOf(value) === "Object";
-	}
-
-function mergeShallow(target, source) {
-	var keys = Object.keys(source),
-		i = -1;
-	while (++i < keys.length) {
-		target[keys[i]] = source[keys[i]];
-	}
-	return target;
-} 
-function intersection(arr1, arr2) {
-	var i=-1, returnArr = [];
-	while (++i < arr1.length) {
-		if (arr2.indexOf(arr1[i]) !== -1) {
-			returnArr.push(arr1[i]);
+	},
+	merge = function(target, source) {
+		var keys = Object.keys(source),
+			key,
+			i = -1;
+		while (++i < keys.length) {
+			key = keys[i];
+			if (isPlainObject(source[key])) {
+				if (!isPlainObject(target[key])) {
+					target[key] = {};
+				}
+				merge(target[key], source[key]);
+			} else {
+				target[key] = source[key];
+			}
 		}
-	}
-	return returnArr;
-}
+		return target;
+	},
+	typeOf = function(value) {
+		return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || '';
+	},
+	intersection = function(arr1, arr2) {
+		var i=-1, returnArr = [];
+		while (++i < arr1.length) {
+			if (arr2.indexOf(arr1[i]) !== -1) {
+				returnArr.push(arr1[i]);
+			}
+		}
+		return returnArr;
+	};
 
-function typeOf(value) {
-	return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || '';
-}
+var regFnArgs = /(\([^)]*\))/,
+	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
+	columns = ['index','name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
+	lsShortcuts = {};
 
 /* ls utils */
 
-function getPropertyDescriptions(target, namePrefix, depth, descr, blackList) {
+function getPropertyDescriptions(target, options, namePrefix, depth, descr, blackList, parent) {
 	namePrefix || (namePrefix = '');
 	descr || (descr = []);
 	blackList || (blackList = []);
 	var lsConfig = ls.c,
+		entry,
 		owner,
 		ownerDepth,
 		ownerCtorName,
 		kind,
 		value,
 		isCircular,
-		parent = descr[descr.length - 1],
-		previousBlackListLength = blackList.length;
+		isPrivate,
+		previousBlackListLength = blackList.length,
+		previousDescrLength;
+
 	if (!isObject(target)) {
 		return descr;
 	}
 	blackList.push(target);
 	for (var name in target) {
+		isPrivate = (name[0] === "_");
+		// TODO: Prevent private recursion when unnecessary
 		owner = target;
 		ownerDepth = 0;
 		while (!owner.hasOwnProperty(name)) {
@@ -66,21 +75,36 @@ function getPropertyDescriptions(target, namePrefix, depth, descr, blackList) {
 		value = target[name];
 		kind = lsConfig.defineKind(value, name, target);
 		isCircular = blackList.indexOf(value) !== -1;
-		descr.push({
+		previousDescrLength = descr.length;
+		entry = {
 			index: descr.length,
-			isPrivate: (parent && parent.isPrivate) || (name[0] === "_"),
 			kind: kind,
 			type: typeOf(value),
+			isPrivate: (parent && parent.isPrivate) || isPrivate,
 			isCircular: isCircular,
+			lsLeaf: false,
 			name: namePrefix + name,
 			_value: value,
 			value: '',
 			owner: owner,
 			ownerDepth: ownerDepth,
 			className: ownerCtorName
-		});
+		};
 		if (depth !== 1 && !isCircular) {
-			getPropertyDescriptions(value, namePrefix + name + lsConfig.nameSep, depth - 1, descr, blackList);
+			getPropertyDescriptions(
+				value,
+				options,
+				namePrefix + name + lsConfig.nameSep,
+				depth - 1,
+				descr,
+				blackList,
+				entry
+			);
+		}
+		entry.lsLeaf = descr.length == previousDescrLength;
+		// Option to leave out recursed entirely
+		if (filterDescription.call(options, entry)) {
+			descr.push(entry);
 		}
 	}
 	// Truncate elements added in the list during this loop
@@ -121,26 +145,12 @@ function sortBy(props, a,b) {
 function filterDescription(el){
 	var options = this,
 		displayValue;
-	if (el.isPrivate && !options.showPrivate) {
-		return false;
-	}
 
 	for (var name in options.filter) {
 		if ((el[name]+'').search(options.filter[name]) === -1) {
 			return false;
 		}
 	}
-
-	// filter that changes its input?
-	// Oh yeah.
-	if (el.isCircular) {
-		displayValue = '[Circular]';
-	} else {
-		displayValue = getDisplayValue(el._value, options, options.showFull ? -1 : 1) + '';
-	}
-
-	// Overwrites...
-	el.value = displayValue;
 	return true;
 }
 
@@ -175,29 +185,61 @@ function printLine(el) {
 	lsConfig.log(line);
 }
 
-function arrToStr(arr, recurse, maxLength, prefix, fn) {
-	var str = '';
-	if (recurse !== 0) {
-		arr.forEach(function(val, index) {
-			if (prefix) {
-				str += '\n' + prefix;
+/**
+ * Converts a collection to a string.
+ * @param {Object|Array} value
+ * @param {Object} options
+ * @param {Number} depth - recursion depth
+ * @param {Array} blackList
+ * @param {String} prefix
+ * @param {Number} maxLength - maximum length of the string.
+ */
+function stringifyCollection(value, options, depth, blackList, prefix, maxLength) {
+	// Either single line, or all indented
+	if (prefix) {
+		prefix = '\n' + prefix;
+	}
+	var isArr = isArray(value),
+		str = isArr ? '[' : '{',
+		iter = isArr ? value : Object.keys(value),
+		isNonEmpty = iter.length > 0,
+		i = -1, iterValue;
+	if (depth !== 0) {
+
+		if (isNonEmpty) {
+			str += ' ';
+		}
+		while (++i < iter.length) {
+			str += prefix;
+			if (isArr) {
+				iterValue = iter[i];
+			} else {
+				str += iter[i] + ": ";
+				iterValue = value[iter[i]];
 			}
-			str += fn(val, index);
-		});
-		str = str.substr(0,Math.max(1, str.length - 1));
-		if (str.length > 1) {
-			str+=" ";
+			str += stringify(iterValue, options, depth-1, blackList, prefix);
+			// Cut off asap
+			if (maxLength && str.length > maxLength - 2) {
+				str = str.substr(0, maxLength - 5) + '...';
+				break;
+			}
+			if (i !== iter.length -1) {
+				str += ', ';
+			}
+		}
+		// remove last comma
+		if (isNonEmpty) {
+			str += " ";
 		}
 	} else {
+		// What lies inside remains a mystery...
 		str += "...";
 	}
-	if (maxLength && str.length > maxLength) {
-		str = str.substr(0, maxLength - 5) + '...';
-	}
+	str += isArr ? ']' : '}';
 	return str;
 }
 
-function getDisplayValue(value, options, recurse, blackList, prefix) {
+function stringify(value, options, depth, blackList, prefix) {
 	blackList || (blackList = []);
 	prefix || (prefix = '');
 	var showFull = options.showFull,
@@ -218,21 +260,15 @@ function getDisplayValue(value, options, recurse, blackList, prefix) {
 		case "string":
 			return '"' + value + '"';
 		case "object":
-			if (blackList.indexOf(value) !== -1) {
-				return "[Circular]";
-			}
-			blackList.push(value);
-			// Showing array contents
-			if (isArray(value)) {
-				return '[' + arrToStr(value, recurse, maxLength, prefix + indent, function(val) {
-					return sprintf(" %s,", getDisplayValue(val, options, recurse-1, blackList, prefix + indent));
-				}) + (showFull ? '\n' + prefix : '') + ']';
-			}
-			// Showing object contents
-			if (isPlainObject(value)) {
-				return '{' + arrToStr(Object.keys(value), recurse, maxLength, prefix + indent, function(key) {
-					return sprintf(" %s: %s,", key, getDisplayValue(value[key], options, recurse-1, blackList, prefix + indent));
-				}) + (showFull ? '\n' + prefix : '')+ "}";
+			// Showing contents
+			if (isPlainObject(value) || isArray(value)) {
+				if (blackList.indexOf(value) !== -1) {
+					return "[Circular]";
+				}
+				blackList.push(value);
+				str = stringifyCollection(value, options, depth, blackList, prefix + indent, maxLength);
+				blackList.pop();
+				return str;
 			}
 		default:
 			return value;
@@ -312,7 +348,6 @@ function createDisplayString(columnsToShow, columnDef) {
  *     <li><code>property</code> - any other value type</li>
  * </ul>
  * @typedef {Object} module:console-ls~Options
- * @prop {Boolean} 					[showPrivate=false] - whether or not to display properties starting with a "_"
  * @prop {String|RegExp|Object.<String|RegExp>} [filter] - filter by column value, where key is the column name.
  * 									Filter will work even if the column is not shown. If filter is a
  * 									String or RegExp, it will filter by name.
@@ -368,7 +403,7 @@ function ls(target) {
 		fnPrintLine,
 		lsConfig = ls.c,
 		defaultOptions = lsConfig.defaultOptions,
-		options = mergeShallow({}, defaultOptions),
+		options = merge({}, defaultOptions),
 		i = 0,
 		max = arguments.length,
 		arg,
@@ -392,7 +427,7 @@ function ls(target) {
 					break;
 			}
 		}
-		mergeShallow(options, arg);
+		merge(options, arg);
 	}
 	// Interpret options
 	if (!isPlainObject(options.filter)) {
@@ -415,8 +450,15 @@ function ls(target) {
 	}
 
 	// Sort all required descriptions
-	descr = getPropertyDescriptions(target, lsConfig.namePrefix, options.r, []);
-	descr = descr.filter(filterDescription.bind(options));
+	descr = getPropertyDescriptions(target, options, lsConfig.namePrefix, options.r, []);
+	descr.forEach(function(el) {
+		if (el.isCircular) {
+			el.value = '[Circular]';
+		} else {
+			el.value = stringify(el._value, options, options.showFull ? -1 : 1) + '';
+		}
+	});
+	//descr = descr.filter(filterDescription.bind(options));
 	descr.sort(sortBy.bind(null, options.sort));
 
 	// Update index properties to 'end result' values
@@ -543,6 +585,7 @@ ls.c = {
 	 * @type {boolean}
 	 */
 	quiet: false,
+
 	/**
 	 * The default values of each option.
 	 * @type {Object}
@@ -550,10 +593,10 @@ ls.c = {
 	defaultOptions: {
 		show: ["kind", "name", "value"],
 		sort: ['-kind', 'name'],
-		filter: {},
-		showPrivate: false,
+		filter: { isPrivate: false },
 		showFull: false,
 		showFullIndent: '',
+		showRecursed: true,
 		r: 1,
 		grep: '' 
 	},
@@ -579,13 +622,13 @@ ls.c = {
 
 ls._add({
 	"find": { r: 0, show: 'name', sort: 'name' },
-	"a":	{ showPrivate: true },
+	"a":	{ filter: { isPrivate: /./ } },
 	"doc":	{ show: ['className', 'kind', 'name', 'type', 'value'], sort: ['className', '-kind', 'name'] },
 	"rgrep":{ r: 0, showFull: true }
 });
 
 ls.cat = function(value) {
-	ls.c.log(getDisplayValue(value, { showFull: true, showFullIndent: '  ' }, -1));
-}
+	ls.c.log(stringify(value, { showFull: true, showFullIndent: '  ' }, -1));
+};
 
 module.exports = ls;
