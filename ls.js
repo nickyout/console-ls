@@ -69,7 +69,8 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 	}
 	blackList.push(target);
 	for (var name in target) {
-		isPrivate = (name[0] === "_");
+		value = target[name];
+		isPrivate = options.definePrivate(value, name, target);
 		if (options.filter.isPrivate !== undefined) {
 			// Probably worth the extra check
 			privateTestEntry.isPrivate = isPrivate;
@@ -84,7 +85,6 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			ownerDepth++;
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
-		value = target[name];
 		kind = options.defineKind(value, name, target);
 		isCircular = blackList.indexOf(value) !== -1;
 		previousDescrLength = descr.length;
@@ -197,10 +197,9 @@ function printLine(sprintfString, propertyDescription) {
  * Converts a collection to a string.
  * @param {Object|Array} value
  * @param {Object} options
- * @param {Number} depth - recursion depth
- * @param {Array} blackList
  * @param {String} prefix
- * @param {Number} maxLength - maximum length of the string.
+ * @param {Array} blackList
+ * @param {Number} depth - recursion depth
  */
 function _stringifyCollection(value, options, prefix, blackList, depth) {
 	// Either single line, or all indented
@@ -215,22 +214,27 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 		maxWidthChar = options.maxWidthChar,
 		indent,
 		iterPrefix;
-	if (!isNumber(depth)) {
-		switch (isArr ? valueFormat.array : valueFormat.object) {
-			case LARGE:
+	switch (isArr ? valueFormat.array : valueFormat.object) {
+		case LARGE:
+			if (!isNumber(depth)) {
 				depth = -1;
-				indent = valueFormat.indent || '';
-				break;
-			case MEDIUM:
+			}
+			indent = valueFormat.indent || '';
+			break;
+		case MEDIUM:
+			if (!isNumber(depth)) {
 				depth = valueFormat.mediumDepth;
-				indent = '';
-				break;
-			case SMALL:
+			}
+			indent = '';
+			break;
+		case SMALL:
+			if (!isNumber(depth)) {
 				depth = 0;
-				break;
-			case NONE:
-				return '';
-		}
+			}
+			break;
+		case NONE:
+		default:
+			return '';
 	}
 	if (indent) {
 		iterPrefix = '\n' + prefix + indent;
@@ -247,7 +251,7 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 				iterValue = value[iter[i]];
 			}
 			str += stringify(iterValue, options, prefix + indent, blackList, depth-1);
-			if (str !== (str = _chop(str, maxWidth - 2, maxWidthChar))) {
+			if (str !== (str = _chop(str, maxWidth && (maxWidth - 2), maxWidthChar))) {
 				break;
 			}
 			if (i !== iter.length -1) {
@@ -310,6 +314,7 @@ function _stringifyFunction(value, options) {
 			str = 'function' + str;
 			break;
 		case NONE:
+		default:
 			return '';
 	}
 	return _chop(str, maxWidth, maxWidthChar);
@@ -669,11 +674,6 @@ ls.reset = function() {
 		 */
 		quiet: false,
 		/**
-		 * If true, additional messages are displayed. Overridden by quiet.
-		 * @type {Boolean}
-		 */
-		verbose: false,
-		/**
 		 * The default values of each option.
 		 * @type {Object}
 		 */
@@ -687,7 +687,7 @@ ls.reset = function() {
 			function: undefined,
 			object: undefined,
 			array: undefined,
-			indent: '',
+			indent: '  ',
 			maxWidth: 40,
 			mediumDepth: 2
 		},
@@ -723,10 +723,11 @@ ls.reset = function() {
 		 */
 		log: c && c.log && c.log.bind(c),
 		/**
-		 * Dictates how the value of "kind" gets interpreted
+		 * Dictates how the value of "kind" gets derived
 		 * @param {*} value
 		 * @param {String} key
 		 * @param {Object|Array|Function|*} source
+		 * @return {String}
 		 */
 		defineKind: function(value, key, source) {
 			if (typeof value === "function") {
@@ -737,6 +738,16 @@ ls.reset = function() {
 				}
 			}
 			return "property";
+		},
+		/**
+		 * Dictates how the value of "isPrivate" gets derived
+		 * @param {*} value
+		 * @param {String} key
+		 * @param {Object|Array|Function|*} source
+		 * @returns {Boolean}
+		 */
+		definePrivate: function(value, key, source) {
+			return key[0] === "_";
 		}
 
 	};
@@ -755,8 +766,7 @@ ls.cat = function(value) {
 			function: LARGE,
 			object: LARGE,
 			array: LARGE,
-			maxWidth: 0,
-			indent: '  '
+			maxWidth: 0
 		},
 		r: 1,
 		show: 'value',
@@ -766,13 +776,18 @@ ls.cat = function(value) {
 	ls(value, catOptions)
 };
 
+/**
+ * Create an ls function preceded by several options objects. Shorthand notations are also supported.
+ * @param {Array} arrOptions - option or array of options.
+ * @returns {Function}
+ */
 function lsCombo(arrOptions) {
 	return function(target) {
 		ls.apply(ls, [target].concat(arrOptions).concat(Array.prototype.slice.call(arguments, 1)));
 	}
 }
 
-function recursiveAdd(target, keys, arrOptions) {
+function _addRecursive(target, keys, arrOptions) {
 	var lsShortcuts = ls._add,
 		i = 0,
 		config,
@@ -785,7 +800,7 @@ function recursiveAdd(target, keys, arrOptions) {
 			if (!target[name]) {
 				target[name] = lsCombo(arrOptionsName);
 			}
-			recursiveAdd(target[name], keys, arrOptionsName);
+			_addRecursive(target[name], keys, arrOptionsName);
 		}
 	}
 }
@@ -804,7 +819,7 @@ ls._add = function(key, options) {
 		ls.o.log(sprintf("Property %s already exists", key));
 	} else {
 		lsShortcuts[key] = options;
-		recursiveAdd(ls, Object.keys(lsShortcuts), []);
+		_addRecursive(ls, Object.keys(lsShortcuts), []);
 	}
 };
 
