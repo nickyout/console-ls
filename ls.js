@@ -1,10 +1,13 @@
 "use strict";
+
+/* common utils */
+
 var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	isObject = require('lodash.isobject'),
 	isArray = require('lodash.isarray'),
-	isPlainObject = function(value) {
-		return value && typeOf(value) === "Object";
-	},
+	isNumber = function(val) { return !isNaN(val) && typeof val === "number" },
+	isPlainObject = function(value) { return value && typeOf(value) === "Object"; },
+	typeOf = function(value) { return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
 	merge = function(target, source) {
 		var keys = Object.keys(source),
 			key,
@@ -22,9 +25,6 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 		}
 		return target;
 	},
-	typeOf = function(value) {
-		return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || '';
-	},
 	intersection = function(arr1, arr2) {
 		var i=-1, returnArr = [];
 		while (++i < arr1.length) {
@@ -34,6 +34,8 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 		}
 		return returnArr;
 	};
+
+/* ls args */
 
 var regFnArgs = /(\([^)]*\))/,
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
@@ -118,12 +120,12 @@ function getFnHead(fn) {
 }
 
 
-function sortBy(props, a,b) {
-	var prop, aVal, bVal, len,
+function sortDescriptions(arrSort, a,b) {
+	var prop, aVal, bVal,
 		fac, ascend,
 		i = 0, returnVal = 0;
 
-	while (prop = props[i++]) {
+	while (prop = arrSort[i++]) {
 		if (prop[0] === '-') {
 			ascend = false;
 			prop = prop.substr(1);
@@ -137,7 +139,7 @@ function sortBy(props, a,b) {
 		} else {
 			fac = (ascend == (aVal > bVal)) * 2 - 1;
 		}
-		returnVal += Math.pow(2, props.length - i) * fac;
+		returnVal += Math.pow(2, arrSort.length - i) * fac;
 	}
 	return returnVal;
 }
@@ -242,10 +244,13 @@ function stringifyCollection(value, options, depth, blackList, prefix, maxLength
 function stringify(value, options, depth, blackList, prefix) {
 	blackList || (blackList = []);
 	prefix || (prefix = '');
-	var showFull = options.showFull,
+	var showFull = options.value.default === "full",
 		maxLength = showFull ? 0 : 50,
-		indent = showFull && options.showFullIndent || '',
+		indent = showFull && options.value.indent || '',
 		str;
+	if (!isNumber(depth)) {
+		depth = showFull ? -1 : 1
+	}
 	switch (typeof value) {
 		case "function":
 			if (showFull) {
@@ -454,7 +459,7 @@ function ls(target) {
 		options.sort = [options.sort];
 	}
 
-	if (typeof options.r !== "number" && options.r) {
+	if (!isNumber(options.r) && options.r) {
 		options.r = 0;
 	}
 
@@ -465,11 +470,11 @@ function ls(target) {
 		if (el.isCircular) {
 			el.value = '[Circular]';
 		} else {
-			el.value = stringify(el._value, options, options.showFull ? -1 : 1) + '';
+			el.value = stringify(el._value, options) + '';
 		}
 	});
 	//descr = descr.filter(filterDescription.bind(options));
-	descr.sort(sortBy.bind(null, options.sort));
+	descr.sort(sortDescriptions.bind(null, options.sort));
 
 	// Update index properties to 'end result' values
 	descr.forEach(function(el, index) {
@@ -497,26 +502,129 @@ function ls(target) {
 	rowsToPrint.forEach(getColumnWidths.bind(null, cols, columnWidths));
 	columnsDef = createColumnsDef(cols, columnWidths);
 	displayString = createDisplayString(options.show.columns, columnsDef);
-	fnPrintLine = printLine.bind( options, displayString);
-	lsConfig.log("Using:", options);
-	lsConfig.log("DisplayString:", displayString);
+	fnPrintLine = printLine.bind(options, displayString);
 
-	// Print
-	options.force = true;
+	// Headers force hack :^)
 	if (!lsConfig.quiet) {
+		lsConfig.verbose && lsConfig.log("Using:", options);
+		options.force = true;
 		fnPrintLine(columnsDef.label);
 		fnPrintLine(columnsDef.sep);
 	}
 	delete options.force;
+
+	// Print rows
 	rowsToPrint.forEach(fnPrintLine);
 
-	// If subset, end message
+	// If subset, add end message
 	if (!lsConfig.quiet && (rowStart || rowEnd)) {
 		lsConfig.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
 	}
 
-
 }
+
+ls.reset = function() {
+	var c = console;
+	ls.c = {
+		/**
+		 * Prefix used for name paths
+		 * @type {String}
+		 * @memberof module:console-ls
+		 */
+		namePrefix: '',
+		/**
+		 * Separator used for name paths
+		 * @type {String}
+		 * @memberof module:console-ls
+		 */
+		nameSep: '.',
+		/**
+		 * Separator between columns
+		 * @type {String}
+		 */
+		columnSep: '|',
+		/**
+		 * Set maximum output width in number of characters.
+		 * @type {Number}
+		 */
+		maxWidth: 0,
+		/**
+		 * This character sequence is used at the place where an output line was cut off.
+		 * @type {String}
+		 * @see module:console-ls#maxWidth
+		 */
+		maxWidthChar: '..',
+		/**
+		 * Set maximum number of output rows.
+		 * @type {Number}
+		 */
+		maxRows: 0,
+		/**
+		 * If true, only the result is printed (no headers etc).
+		 * @type {Boolean}
+		 */
+		quiet: false,
+		/**
+		 * If true, additional messages are displayed. Overridden by quiet.
+		 * @type {Boolean}
+		 */
+		verbose: false,
+		/**
+		 * The default values of each option.
+		 * @type {Object}
+		 */
+		defaultOptions: {
+			show: {
+				columns: ["kind", "name", "value"]
+			},
+			value: {
+				default: 'short',
+				function: 'short',
+				object: 'short',
+				array: 'short',
+				indent: ''
+			},
+			sort: ['-kind', 'name'],
+			filter: {
+				isPrivate: false
+			},
+			showFull: false,
+			r: 1,
+			grep: ''
+		},
+		/**
+		 * Output function. Default is console.log.
+		 * @type {Function}
+		 */
+		log: c && c.log && c.log.bind(c),
+		/**
+		 * Dictates how the value of "kind" gets interpreted
+		 * @param {*} value
+		 * @param {String} key
+		 * @param {Object|Array|Function|*} source
+		 */
+		defineKind: function(value, key, source) {
+			if (typeof value === "function") {
+				if (/^[A-Z]/.test(key)) {
+					return "class";
+				} else {
+					return "method";
+				}
+			}
+			return "property";
+		}
+
+	};
+};
+
+// Sets defaults
+ls.reset();
+
+/* additional API methods */
+
+ls.cat = function(value) {
+	ls.c.log(stringify(value, { value: { default: 'full', indent: '  ' } }, -1));
+};
 
 function lsCombo(arrOptions) {
 	return function(target) {
@@ -543,7 +651,7 @@ function recursiveAdd(target, keys, arrOptions) {
 
 ls._add = function(key, options) {
 	var arr,
-		name, 
+		name,
 		i = 0;
 	if (isObject(key)) {
 		arr = Object.keys(key);
@@ -558,79 +666,6 @@ ls._add = function(key, options) {
 	}
 };
 
-ls.c = {
-	/**
-	 * Prefix used for name paths
-	 * @type {String}
-	 * @memberof module:console-ls
-	 */
-	namePrefix: '',
-	/**
-	 * Separator used for name paths
-	 * @type {String}
-	 * @memberof module:console-ls
-	 */
-	nameSep: '.',
-	/**
-	 * Separator between columns
-	 * @type {string}
-	 */
-	columnSep: '|',
-	/**
-	 * Set maximum output width in number of characters.
-	 * @type {number}
-	 */
-	maxWidth: 0,
-	/**
-	 * This character sequence is used at the place where an output line was cut off.
-	 * @type {string}
-	 * @see module:console-ls#maxWidth
-	 */
-	maxWidthChar: '..',
-	/**
-	 * Set maximum number of output rows.
-	 * @type {number}
-	 */
-	maxRows: 0,
-	/**
-	 * If true, only the result is printed (no headers etc).
-	 * @type {boolean}
-	 */
-	quiet: false,
-
-	/**
-	 * The default values of each option.
-	 * @type {Object}
-	 */
-	defaultOptions: {
-		show: { columns: ["kind", "name", "value"] },
-		sort: ['-kind', 'name'],
-		filter: { isPrivate: false },
-		showFull: false,
-		showFullIndent: '',
-		r: 1,
-		grep: '' 
-	},
-	/**
-	 * Dictates how the value of "kind" gets interpreted
-	 * @param {*} value
-	 * @param {String} key
-	 * @param {Object|Array|Function|*} source
-	 */
-	defineKind: function(value, key, source) {
-		if (typeof value === "function") {
-			if (/^[A-Z]/.test(key)) {
-				return "class";
-			} else {
-				return "method";
-			}
-		} 
-		return "property";
-	},
-
-	log: console.log.bind(console)
-};
-
 ls._add({
 	"find": { r: 0, show: 'name', sort: 'name' },
 	"a":	{ filter: { isPrivate: /./ } },
@@ -638,8 +673,6 @@ ls._add({
 	"rgrep":{ r: 0, showFull: true }
 });
 
-ls.cat = function(value) {
-	ls.c.log(stringify(value, { showFull: true, showFullIndent: '  ' }, -1));
-};
+/* ...and export! */
 
 module.exports = ls;
