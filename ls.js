@@ -7,6 +7,7 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	isArray = require('lodash.isarray'),
 	isNumber = function(val) { return !isNaN(val) && typeof val === "number" },
 	isPlainObject = function(value) { return value && typeOf(value) === "Object"; },
+	isCollection = function(val) { return isArray(val) || isPlainObject(val); },
 	typeOf = function(value) { return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
 	merge = function(target, source) {
 		var keys = Object.keys(source),
@@ -38,9 +39,13 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 /* ls args */
 
 var regFnArgs = /(\([^)]*\))/,
+	privateTestEntry = {},
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
 	columns = ['index','name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
-	lsShortcuts = {};
+	LARGE = 'large',
+	MEDIUM = 'medium',
+	SMALL = 'small',
+	NONE = 'none';
 
 /* ls utils */
 
@@ -48,8 +53,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 	namePrefix || (namePrefix = '');
 	descr || (descr = []);
 	blackList || (blackList = []);
-	var lsConfig = ls.c,
-		entry,
+	var entry,
 		owner,
 		ownerDepth,
 		ownerCtorName,
@@ -66,7 +70,13 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 	blackList.push(target);
 	for (var name in target) {
 		isPrivate = (name[0] === "_");
-		// TODO: Prevent private recursion when unnecessary
+		if (options.filter.isPrivate !== undefined) {
+			// Probably worth the extra check
+			privateTestEntry.isPrivate = isPrivate;
+			if (!filterDescription.call(options, privateTestEntry)) {
+				return descr;
+			}
+		}
 		owner = target;
 		ownerDepth = 0;
 		while (!owner.hasOwnProperty(name)) {
@@ -75,7 +85,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
 		value = target[name];
-		kind = lsConfig.defineKind(value, name, target);
+		kind = options.defineKind(value, name, target);
 		isCircular = blackList.indexOf(value) !== -1;
 		previousDescrLength = descr.length;
 		entry = {
@@ -96,14 +106,14 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			getPropertyDescriptions(
 				value,
 				options,
-				namePrefix + name + lsConfig.nameSep,
+				namePrefix + name + options.nameSep,
 				depth - 1,
 				descr,
 				blackList,
 				entry
 			);
 		}
-		entry.lsLeaf = descr.length == previousDescrLength;
+		entry.lsLeaf = !isCollection(value) || descr.length == previousDescrLength;
 		// Option to leave out recursed entirely
 		if (filterDescription.call(options, entry)) {
 			descr.push(entry);
@@ -113,12 +123,6 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 	blackList.length = previousBlackListLength;
 	return descr;
 }
-
-function getFnHead(fn) {
-	var fnMatch = (fn + '').match(regFnArgs);
-	return 'function' + (fnMatch ? fnMatch[1] : '()');
-}
-
 
 function sortDescriptions(arrSort, a,b) {
 	var prop, aVal, bVal,
@@ -146,10 +150,10 @@ function sortDescriptions(arrSort, a,b) {
 
 function filterDescription(el){
 	var options = this,
-		displayValue;
+		filter = options.filter;
 
-	for (var name in options.filter) {
-		if ((el[name]+'').search(options.filter[name]) === -1) {
+	for (var name in filter) {
+		if (el.hasOwnProperty(name) && filter[name] !== undefined && (el[name]+'').search(filter[name]) === -1) {
 			return false;
 		}
 	}
@@ -167,24 +171,26 @@ function getColumnWidths(keys, columnWidths, el) {
 	}
 }
 
-function printLine(displayString, el) {
+/**
+ * Prints a property description using the log function in options.
+ * @param sprintfString
+ * @param propertyDescription
+ * @this {Object} options
+ */
+function printLine(sprintfString, propertyDescription) {
 	var options = this,
 		force = options.force,
-		lsConfig = ls.c,
-		maxWidth = +lsConfig.maxWidth,
-		maxWidthChar,
-		args = columns.map(function(key) { return el[key] }),
+		maxWidth = options.maxWidth,
+		maxWidthChar = options.maxWidthChar,
+		args = columns.map(function(key) { return propertyDescription[key] }),
 		line;
-	args.unshift(displayString);
+	args.unshift(sprintfString);
 	line = sprintf.apply(null, args); 
 	if (!force && options.grep && line.search(options.grep) === -1) {
 		return;
 	}
-	if (maxWidth && line.length > Math.abs(maxWidth)) {
-		maxWidthChar = '' + lsConfig.maxWidthChar;
-		line = maxWidth > 0 ? line.substr(0, maxWidth - maxWidthChar.length) + maxWidthChar: maxWidthChar + line.substr(maxWidth + maxWidthChar.length);
-	}
-	lsConfig.log(line);
+	line = _chop(line, maxWidth, maxWidthChar);
+	options.log(line);
 }
 
 /**
@@ -196,91 +202,169 @@ function printLine(displayString, el) {
  * @param {String} prefix
  * @param {Number} maxLength - maximum length of the string.
  */
-function stringifyCollection(value, options, depth, blackList, prefix, maxLength) {
+function _stringifyCollection(value, options, prefix, blackList, depth) {
 	// Either single line, or all indented
-	if (prefix) {
-		prefix = '\n' + prefix;
-	}
 	var isArr = isArray(value),
 		str = isArr ? '[' : '{',
 		iter = isArr ? value : Object.keys(value),
 		isNonEmpty = iter.length > 0,
-		i = -1, iterValue;
-	if (depth !== 0) {
-
-		if (isNonEmpty) {
-			str += ' ';
+		i = -1,
+		iterValue,
+		valueFormat = options.value,
+		maxWidth = valueFormat.maxWidth,
+		maxWidthChar = options.maxWidthChar,
+		indent,
+		iterPrefix;
+	if (!isNumber(depth)) {
+		switch (isArr ? valueFormat.array : valueFormat.object) {
+			case LARGE:
+				depth = -1;
+				indent = valueFormat.indent || '';
+				break;
+			case MEDIUM:
+				depth = valueFormat.mediumDepth;
+				indent = '';
+				break;
+			case SMALL:
+				depth = 0;
+				break;
+			case NONE:
+				return '';
 		}
+	}
+	if (indent) {
+		iterPrefix = '\n' + prefix + indent;
+	} else {
+		iterPrefix = ' ';
+	}
+	if (depth !== 0) {
 		while (++i < iter.length) {
-			str += prefix;
+			str += iterPrefix;
 			if (isArr) {
 				iterValue = iter[i];
 			} else {
 				str += iter[i] + ": ";
 				iterValue = value[iter[i]];
 			}
-			str += stringify(iterValue, options, depth-1, blackList, prefix);
-			// Cut off asap
-			if (maxLength && str.length > maxLength - 2) {
-				str = str.substr(0, maxLength - 5) + '...';
+			str += stringify(iterValue, options, prefix + indent, blackList, depth-1);
+			if (str !== (str = _chop(str, maxWidth - 2, maxWidthChar))) {
 				break;
 			}
 			if (i !== iter.length -1) {
 				str += ', ';
 			}
 		}
-		// remove last comma
 		if (isNonEmpty) {
-			str += " ";
+			str += ' ';
 		}
 	} else {
-		// What lies inside remains a mystery...
-		str += "...";
+		if (isNonEmpty) {
+			// What lies inside remains a mystery...
+			str += maxWidthChar;
+		}
 	}
 	str += isArr ? ']' : '}';
 	return str;
 }
 
-function stringify(value, options, depth, blackList, prefix) {
+/**
+ * Chops off the end of a string if its length exceeds the number maxWidth.
+ * If maxWidth is a negative number, chops from the beginning of the string.
+ * If maxWidth is 0, no chopping happens.
+ * @param {String} str - the string to chop
+ * @param {Number} [maxWidth=0] - the size limit. If negative, chops from the other beginning
+ * @param {String} [maxWidthChar=''] - the string placed where the chopping occurred.
+ * @return {String} the resulting string
+ */
+function _chop(str, maxWidth, maxWidthChar) {
+	maxWidthChar || (maxWidthChar = '');
+	if (maxWidth && str.length > Math.abs(maxWidth)) {
+		if (maxWidth < 0) {
+			return maxWidthChar + str.substr(maxWidth + maxWidthChar.length)
+		} else {
+			return str.substr(0, maxWidth - maxWidthChar.length) + maxWidthChar;
+		}
+	}
+	return str;
+}
+
+function _stringifyFunction(value, options) {
+	var str = '',
+		fnMatch,
+		valueFormat = options.value,
+		indent = valueFormat.indent,
+		maxWidth = valueFormat.maxWidth,
+		maxWidthChar = options.maxWidthChar;
+	switch (valueFormat.function) {
+		case LARGE:
+			str += value;
+			if (!indent) {
+				str = str.replace(/\s*\n\s*/gm, ' ');
+			}
+			break;
+		case MEDIUM:
+			fnMatch = (value + '').match(regFnArgs);
+			str += (fnMatch ? fnMatch[1] : '()');
+		// Fallthrough
+		case SMALL:
+			str = 'function' + str;
+			break;
+		case NONE:
+			return '';
+	}
+	return _chop(str, maxWidth, maxWidthChar);
+}
+
+/**
+ *
+ * @param {*} value
+ * @param {Object} options
+ * @param {String} [prefix]
+ * @param {Array} [blackList]
+ * @param {Number} [depth]
+ */
+function stringify(value, options, prefix, blackList, depth) {
 	blackList || (blackList = []);
 	prefix || (prefix = '');
-	var showFull = options.value.default === "full",
-		maxLength = showFull ? 0 : 50,
-		indent = showFull && options.value.indent || '',
-		str;
-	if (!isNumber(depth)) {
-		depth = showFull ? -1 : 1
-	}
+	var str,
+		valueFormat = options.value,
+		maxWidth = valueFormat.maxWidth,
+		maxWidthChar = options.maxWidthChar;
 	switch (typeof value) {
 		case "function":
-			if (showFull) {
-				str = '' + value;
-				if (!indent) {
-					str = str.replace(/\s*\n\s*/gm, ' ');
-				}
-			} else {
-				str = getFnHead(value);
-			}
-			return str;
+			return _stringifyFunction(value, options);
 		case "string":
-			return '"' + value + '"';
+			str = '"' + value + '"';
+			break;
 		case "object":
 			// Showing contents
-			if (isPlainObject(value) || isArray(value)) {
+			if (isCollection(value)) {
+				// First call
 				if (blackList.indexOf(value) !== -1) {
 					return "[Circular]";
 				}
 				blackList.push(value);
-				str = stringifyCollection(value, options, depth, blackList, prefix + indent, maxLength);
+				str = _stringifyCollection(value, options, prefix, blackList, depth);
 				blackList.pop();
 				return str;
 			}
+		// Fallthrough intended
 		default:
-			return value;
+			str = "" + value;
 	}
+	str = _chop(str, maxWidth, maxWidthChar);
+	return str;
 }
 
-function createColumnsDef(arr, columnWidths) {
+/**
+ * Returns an object with the properties sprintf, label and sep that have the same properties
+ * as a property description. They can hence be printed in the same way
+ * @param {Array} arr - the properties to set.
+ * Since only these columns are printed, others do not need to be set.
+ * @param {Object} columnWidths - keys are column names, values are column widths
+ * @returns {{sprintf: {}, label: {}, sep: {}}}
+ */
+function createColumnDescriptions(arr, columnWidths) {
 	columnWidths || (columnWidths = {/*unused*/});
 	var i = 0,
 		columnDef = {
@@ -302,20 +386,91 @@ function createColumnsDef(arr, columnWidths) {
 	return columnDef;
 }
 
-function createDisplayString(columnsToShow, columnDef) {
-	var i = -1,
+/**
+ * Creates the string for sprintf used for each row.
+ * @param {Object} columnDescriptions
+ * @this {Object} options
+ * @returns {string}
+ */
+function createSprintfString(columnDescriptions) {
+	var options = this,
+		columnsToShow = options.show,
+		i = -1,
 		showCol,
 		str,
 		arr = columnsToShow.slice();
 	while (showCol = arr[++i]) {
-		arr[i] = columnDef.sprintf[showCol] || '';
+		arr[i] = columnDescriptions.sprintf[showCol] || '';
 	}
 	// Last one does no spacing
 	if (str = arr[arr.length - 1]) {
 		str = str.replace(/-\d+/, '');
 		arr[arr.length-1] = str;
 	}
-	return arr.join(ls.c.columnSep);
+	return arr.join(options.columnSep);
+}
+
+function createOptions(defaultOptions, args) {
+	var options = {},
+		i = 0,
+		max = args.length,
+		arg,
+		value,
+		cols;
+	if (defaultOptions) {
+		options = merge(options, defaultOptions);
+	}
+	while (++i < max) {
+		arg = args[i];
+		if (!isPlainObject(arg)) {
+			// Shortcuts:
+			switch (typeOf(arg)) {
+				// options as grep
+				case "String":
+				case "RegExp":
+					arg = { grep: arg };
+					break;
+				// recursion depth (0 is infinite)
+				case "Number":
+					arg = { r: arg };
+					break;
+			}
+		}
+		if (arg.value && !isPlainObject(arg.value)) {
+			arg.value = { default: arg.value };
+		}
+		if (arg.filter && !isPlainObject(arg.filter)) {
+			arg.filter = { name: arg.filter };
+		}
+		merge(options, arg);
+	}
+
+	// Interpret options
+	if (options.show === "all") {
+		options.show = columns.slice();
+	} else {
+		cols = options.show;
+		if (!isArray(cols)) {
+			cols = [cols];
+		}
+		options.show = intersection(cols, columns);
+	}
+
+	if (!isArray(options.sort)) {
+		options.sort = [options.sort];
+	}
+
+	if (!isNumber(options.r) && options.r) {
+		options.r = 0;
+	}
+
+	// Normalize value settings
+	value = options.value;
+	value.default || (value.default = MEDIUM);
+	value.function || (value.function = value.default);
+	value.object || (value.object = value.default);
+	value.array || (value.array = value.default);
+	return options;
 }
 
 /**
@@ -406,66 +561,17 @@ function ls(target) {
 		rowStart,
 		rowEnd,
 		fnPrintLine,
-		lsConfig = ls.c,
-		defaultOptions = lsConfig.defaultOptions,
-		options = merge({}, defaultOptions),
-		i = 0,
-		max = arguments.length,
-		arg,
-		columnsDef,
+		options = createOptions(ls.o, arguments),
+		columnDescriptions,
 		columnWidths = {},
 		cols,
-		maxRows = lsConfig.maxRows,
-		displayString;
+		maxRows = options.maxRows,
+		sprintfString;
 	// Merge arguments into options
-	while (++i < max) {
-		arg = arguments[i];
-		if (!isPlainObject(arg)) {
-			// Shortcuts:
-			switch (typeOf(arg)) {
-				// options as grep
-				case "String":
-				case "RegExp":
-					arg = { grep: arg };
-					break;
-				// recursion depth (0 is infinite)
-				case "Number":
-					arg = { r: arg };
-					break;
-			}
-		}
-		if (arg.filter && !isPlainObject(arg.filter)) {
-			arg.filter = { name: arg.filter };
-		}
-
-		if (typeof arg.show === "string" || isArray(arg.show)) {
-			arg.show = { columns: arg.show }
-		}
-		if (arg.show && arg.show.columns) {
-			cols = arg.show.columns;
-			if (cols === "all") {
-				arg.show.columns = columns.slice();
-			} else {
-				if (!isArray(cols)) {
-					cols = [cols];
-				}
-				arg.show.columns = intersection(cols, columns);
-			}
-		}
-		merge(options, arg);
-	}
-	// Interpret options
-	if (!isArray(options.sort)) {
-		options.sort = [options.sort];
-	}
-
-	if (!isNumber(options.r) && options.r) {
-		options.r = 0;
-	}
 
 	// Sort all required descriptions
-	cols = options.show.columns;
-	descr = getPropertyDescriptions(target, options, lsConfig.namePrefix, options.r, []);
+	cols = options.show;
+	descr = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
 	descr.forEach(function(el) {
 		if (el.isCircular) {
 			el.value = '[Circular]';
@@ -500,16 +606,15 @@ function ls(target) {
 		columnWidths[key] = key.length;
 	});
 	rowsToPrint.forEach(getColumnWidths.bind(null, cols, columnWidths));
-	columnsDef = createColumnsDef(cols, columnWidths);
-	displayString = createDisplayString(options.show.columns, columnsDef);
-	fnPrintLine = printLine.bind(options, displayString);
+	columnDescriptions = createColumnDescriptions(cols, columnWidths);
+	sprintfString = createSprintfString.call(options, columnDescriptions);
+	fnPrintLine = printLine.bind(options, sprintfString);
 
-	// Headers force hack :^)
-	if (!lsConfig.quiet) {
-		lsConfig.verbose && lsConfig.log("Using:", options);
+	// Headers force hack, omit grep :^)
+	if (!options.quiet) {
 		options.force = true;
-		fnPrintLine(columnsDef.label);
-		fnPrintLine(columnsDef.sep);
+		fnPrintLine(columnDescriptions.label);
+		fnPrintLine(columnDescriptions.sep);
 	}
 	delete options.force;
 
@@ -517,15 +622,14 @@ function ls(target) {
 	rowsToPrint.forEach(fnPrintLine);
 
 	// If subset, add end message
-	if (!lsConfig.quiet && (rowStart || rowEnd)) {
-		lsConfig.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
+	if (!options.quiet && (rowStart || rowEnd)) {
+		options.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
 	}
-
 }
 
 ls.reset = function() {
 	var c = console;
-	ls.c = {
+	ls.o = {
 		/**
 		 * Prefix used for name paths
 		 * @type {String}
@@ -573,25 +677,46 @@ ls.reset = function() {
 		 * The default values of each option.
 		 * @type {Object}
 		 */
-		defaultOptions: {
-			show: {
-				columns: ["kind", "name", "value"]
-			},
-			value: {
-				default: 'short',
-				function: 'short',
-				object: 'short',
-				array: 'short',
-				indent: ''
-			},
-			sort: ['-kind', 'name'],
-			filter: {
-				isPrivate: false
-			},
-			showFull: false,
-			r: 1,
-			grep: ''
+		show: ["kind", "name", "value"],
+		/**
+		 * Value display settings for non-literals.
+		 * @type {Object}
+		 */
+		value: {
+			default: MEDIUM,
+			function: undefined,
+			object: undefined,
+			array: undefined,
+			indent: '',
+			maxWidth: 40,
+			mediumDepth: 2
 		},
+		/**
+		 * Sort resulting rows alphabetically by these rows
+		 * @type {Array.<String>|String}
+		 */
+		sort: ['-kind', 'name'],
+		/**
+		 * Inclusive filter per column value. Only rows that match every filter gets displayed.
+		 * Any value except `undefined` is directly fed to the `String#search` method.
+		 * Use `undefined` to unset a (previously set) filter. Use the string `"undefined"`
+		 * if you want to search for the value.
+		 * @type {Object.<*>}
+		 */
+		filter: {
+			isPrivate: false
+		},
+		/**
+		 * Recursion depth. 0 or less is exhaustive (handling circular).
+		 * Default is 1, which is only direct properties.
+		 * @type {Number}
+		 */
+		r: 1,
+		/**
+		 * When a row is printed, the resulting string is filtered with this.
+		 * @type {String|RegExp}
+		 */
+		grep: '',
 		/**
 		 * Output function. Default is console.log.
 		 * @type {Function}
@@ -623,7 +748,22 @@ ls.reset();
 /* additional API methods */
 
 ls.cat = function(value) {
-	ls.c.log(stringify(value, { value: { default: 'full', indent: '  ' } }, -1));
+	value = { '': value };
+	var catOptions = {
+		value: {
+			default: LARGE,
+			function: LARGE,
+			object: LARGE,
+			array: LARGE,
+			maxWidth: 0,
+			indent: '  '
+		},
+		r: 1,
+		show: 'value',
+		sort: [],
+		quiet: true
+	};
+	ls(value, catOptions)
 };
 
 function lsCombo(arrOptions) {
@@ -633,7 +773,8 @@ function lsCombo(arrOptions) {
 }
 
 function recursiveAdd(target, keys, arrOptions) {
-	var i = 0,
+	var lsShortcuts = ls._add,
+		i = 0,
 		config,
 		arrOptionsName,
 		name;
@@ -650,7 +791,8 @@ function recursiveAdd(target, keys, arrOptions) {
 }
 
 ls._add = function(key, options) {
-	var arr,
+	var lsShortcuts = ls._add,
+		arr,
 		name,
 		i = 0;
 	if (isObject(key)) {
@@ -659,7 +801,7 @@ ls._add = function(key, options) {
 			ls._add(name, key[name])
 		}
 	} else if (ls[key]) {
-		ls.c.log(sprintf("Property %s already exists", key));
+		ls.o.log(sprintf("Property %s already exists", key));
 	} else {
 		lsShortcuts[key] = options;
 		recursiveAdd(ls, Object.keys(lsShortcuts), []);
@@ -667,10 +809,11 @@ ls._add = function(key, options) {
 };
 
 ls._add({
-	"find": { r: 0, show: 'name', sort: 'name' },
-	"a":	{ filter: { isPrivate: /./ } },
+	"find": { r: 0, show: 'name', sort: 'name', value: { function: NONE, object: NONE, array: NONE } },
+	"a":	{ filter: { isPrivate: undefined } },
 	"doc":	{ show: ['className', 'kind', 'name', 'type', 'value'], sort: ['className', '-kind', 'name'] },
-	"rgrep":{ r: 0, showFull: true }
+	"rgrep":{ r: 0, filter: { lsLeaf: true }, value: { function: LARGE, indent: '', maxWidth: 0 } },
+	"jsonPath": { nameSep: '/', namePrefix: '/' }
 });
 
 /* ...and export! */
