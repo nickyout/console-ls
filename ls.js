@@ -165,7 +165,7 @@ function getColumnWidths(keys, columnWidths, el) {
 	}
 }
 
-function printLine(el) {
+function printLine(displayString, el) {
 	var options = this,
 		force = options.force,
 		lsConfig = ls.c,
@@ -173,7 +173,7 @@ function printLine(el) {
 		maxWidthChar,
 		args = columns.map(function(key) { return el[key] }),
 		line;
-	args.unshift(options.show);
+	args.unshift(displayString);
 	line = sprintf.apply(null, args); 
 	if (!force && options.grep && line.search(options.grep) === -1) {
 		return;
@@ -409,7 +409,9 @@ function ls(target) {
 		arg,
 		columnsDef,
 		columnWidths = {},
-		maxRows = lsConfig.maxRows;
+		cols,
+		maxRows = lsConfig.maxRows,
+		displayString;
 	// Merge arguments into options
 	while (++i < max) {
 		arg = arguments[i];
@@ -427,22 +429,29 @@ function ls(target) {
 					break;
 			}
 		}
+		if (arg.filter && !isPlainObject(arg.filter)) {
+			arg.filter = { name: arg.filter };
+		}
+
+		if (typeof arg.show === "string" || isArray(arg.show)) {
+			arg.show = { columns: arg.show }
+		}
+		if (arg.show && arg.show.columns) {
+			cols = arg.show.columns;
+			if (cols === "all") {
+				arg.show.columns = columns.slice();
+			} else {
+				if (!isArray(cols)) {
+					cols = [cols];
+				}
+				arg.show.columns = intersection(cols, columns);
+			}
+		}
 		merge(options, arg);
 	}
 	// Interpret options
-	if (!isPlainObject(options.filter)) {
-		options.filter = { name: options.filter };
-	}
 	if (!isArray(options.sort)) {
 		options.sort = [options.sort];
-	}
-	if (options.show === "all") {
-		options.show = columns.slice();
-	} else {
-		if (!isArray(options.show)) {
-			options.show = [options.show];
-		}
-		options.show = intersection(options.show, columns);
 	}
 
 	if (typeof options.r !== "number" && options.r) {
@@ -450,6 +459,7 @@ function ls(target) {
 	}
 
 	// Sort all required descriptions
+	cols = options.show.columns;
 	descr = getPropertyDescriptions(target, options, lsConfig.namePrefix, options.r, []);
 	descr.forEach(function(el) {
 		if (el.isCircular) {
@@ -481,13 +491,15 @@ function ls(target) {
 	}
 
 	// Create properly sized print method
-	options.show.forEach(function(key) {
+	cols.forEach(function(key) {
 		columnWidths[key] = key.length;
 	});
-	rowsToPrint.forEach(getColumnWidths.bind(null, options.show, columnWidths));
-	columnsDef = createColumnsDef(options.show, columnWidths);
-	options.show = createDisplayString(options.show, columnsDef);
-	fnPrintLine = printLine.bind(options);
+	rowsToPrint.forEach(getColumnWidths.bind(null, cols, columnWidths));
+	columnsDef = createColumnsDef(cols, columnWidths);
+	displayString = createDisplayString(options.show.columns, columnsDef);
+	fnPrintLine = printLine.bind( options, displayString);
+	lsConfig.log("Using:", options);
+	lsConfig.log("DisplayString:", displayString);
 
 	// Print
 	options.force = true;
@@ -591,12 +603,11 @@ ls.c = {
 	 * @type {Object}
 	 */
 	defaultOptions: {
-		show: ["kind", "name", "value"],
+		show: { columns: ["kind", "name", "value"] },
 		sort: ['-kind', 'name'],
 		filter: { isPrivate: false },
 		showFull: false,
 		showFullIndent: '',
-		showRecursed: true,
 		r: 1,
 		grep: '' 
 	},
