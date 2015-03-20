@@ -41,7 +41,7 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 var regFnArgs = /(\([^)]*\))/,
 	privateTestEntry = {},
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
-	columns = ['index','name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
+	allColumns = ['index','name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
@@ -173,24 +173,38 @@ function getColumnWidths(keys, columnWidths, el) {
 
 /**
  * Prints a property description using the log function in options.
- * @param sprintfString
- * @param propertyDescription
+ * Chops off line if it is too long.
+ * @param line
+ */
+function printLine(line) {
+	var options = this;
+	options.log(_chop(line, options.maxWidth, options.maxWidthChar));
+}
+
+/**
+ * Converts a propertyDescription into a string or array of strings and adds them to argument `lines`.
+ * @param {Array} lines
+ * @param {String} sprintfString
+ * @param {Object} propertyDescription
  * @this {Object} options
  */
-function printLine(sprintfString, propertyDescription) {
+function descriptionToLines(lines, sprintfString, propertyDescription) {
 	var options = this,
+		args = [sprintfString],
 		force = options.force,
-		maxWidth = options.maxWidth,
-		maxWidthChar = options.maxWidthChar,
-		args = columns.map(function(key) { return propertyDescription[key] }),
-		line;
-	args.unshift(sprintfString);
-	line = sprintf.apply(null, args); 
+		line,
+		i = 0,
+		key;
+
+	// Append each value of column to it
+	while (key = allColumns[i++]) {
+		args.push(propertyDescription[key]);
+	}
+	line = sprintf.apply(null, args);
 	if (!force && options.grep && line.search(options.grep) === -1) {
 		return;
 	}
-	line = _chop(line, maxWidth, maxWidthChar);
-	options.log(line);
+	lines.push.apply(lines, line.split('\n'));
 }
 
 /**
@@ -383,7 +397,7 @@ function createColumnDescriptions(arr, columnWidths) {
 	while (key = arr[i++]) {
 		// nonzero
 		width = Math.max(columnWidths[key], key.length);
-		index = columns.indexOf(key)+1;
+		index = allColumns.indexOf(key)+1;
 		columnDef.sprintf[key] = "%"+index+"$-"+width+"s";
 		columnDef.label[key] = key;
 		columnDef.sep[key] = sprintf("%'-"+width+"s", '');
@@ -452,13 +466,13 @@ function createOptions(defaultOptions, args) {
 
 	// Interpret options
 	if (options.show === "all") {
-		options.show = columns.slice();
+		options.show = allColumns.slice();
 	} else {
 		cols = options.show;
 		if (!isArray(cols)) {
 			cols = [cols];
 		}
-		options.show = intersection(cols, columns);
+		options.show = intersection(cols, allColumns);
 	}
 
 	if (!isArray(options.sort)) {
@@ -561,74 +575,88 @@ function createOptions(defaultOptions, args) {
  * @module {Function} console-ls
  */
 function ls(target) {
-	var descr,
-		rowsToPrint,
+	var descriptions,
+		descriptionsToPrint,
 		rowStart,
 		rowEnd,
-		fnPrintLine,
+		fnDescriptionToLine,
 		options = createOptions(ls.o, arguments),
 		columnDescriptions,
 		columnWidths = {},
 		cols,
 		maxRows = options.maxRows,
-		sprintfString;
+		allLines = [],
+		sprintfString,
+		i = 0, el, max;
 	// Merge arguments into options
 
 	// Sort all required descriptions
 	cols = options.show;
-	descr = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
-	descr.forEach(function(el) {
+	descriptions = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
+	i = 0;
+	while (el = descriptions[i++]) {
 		if (el.isCircular) {
 			el.value = '[Circular]';
 		} else {
 			el.value = stringify(el._value, options) + '';
 		}
-	});
+	}
 	//descr = descr.filter(filterDescription.bind(options));
-	descr.sort(sortDescriptions.bind(null, options.sort));
-
-	// Update index properties to 'end result' values
-	descr.forEach(function(el, index) {
-		el.index = index;
-	});
+	descriptions.sort(sortDescriptions.bind(null, options.sort));
 
 	// Truncate excess
-	if (maxRows && Math.abs(maxRows) < descr.length) {
+	if (maxRows && Math.abs(maxRows) < descriptions.length) {
 		if (maxRows > 0) {
 			rowStart = 0;
 			rowEnd = maxRows;
 		} else {
-			rowStart = descr.length + maxRows;
-			rowEnd = descr.length;
+			rowStart = descriptions.length + maxRows;
+			rowEnd = descriptions.length;
 		}
-		rowsToPrint = descr.slice(rowStart, rowEnd);
+		descriptionsToPrint = descriptions.slice(rowStart, rowEnd);
 	} else {
-		rowsToPrint = descr;
+		descriptionsToPrint = descriptions;
 	}
 
 	// Create properly sized print method
-	cols.forEach(function(key) {
-		columnWidths[key] = key.length;
-	});
-	rowsToPrint.forEach(getColumnWidths.bind(null, cols, columnWidths));
+	i = 0;
+	while (el = cols[i++]) {
+		columnWidths[el] = el.length;
+	}
+	i = 0;
+	while (el = descriptionsToPrint[i++]) {
+		getColumnWidths(cols, columnWidths, el);
+	}
 	columnDescriptions = createColumnDescriptions(cols, columnWidths);
 	sprintfString = createSprintfString.call(options, columnDescriptions);
-	fnPrintLine = printLine.bind(options, sprintfString);
+	fnDescriptionToLine = descriptionToLines.bind(options, allLines, sprintfString);
 
+	// Collect lines
 	// Headers force hack, omit grep :^)
 	if (!options.quiet) {
 		options.force = true;
-		fnPrintLine(columnDescriptions.label);
-		fnPrintLine(columnDescriptions.sep);
+		fnDescriptionToLine(columnDescriptions.label);
+		fnDescriptionToLine(columnDescriptions.sep);
 	}
 	delete options.force;
+	i = 0;
+	while (el = descriptionsToPrint[i++]) {
+		fnDescriptionToLine(el);
+	}
 
-	// Print rows
-	rowsToPrint.forEach(fnPrintLine);
+	// Clear immediately
+	descriptionsToPrint.length = descriptions.length = 0;
 
 	// If subset, add end message
 	if (!options.quiet && (rowStart || rowEnd)) {
-		options.log(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descr.length));
+		allLines.push(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descriptions.length));
+	}
+
+	// Print lines
+	i = -1;
+	max = allLines.length;
+	while (++i < max) {
+		printLine.call(options, allLines[i]);
 	}
 }
 
