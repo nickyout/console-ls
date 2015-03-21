@@ -671,7 +671,7 @@ function ls(target) {
 	if (bufferEnabled) {
 		// Either store lines into buffer
 		buffer = allLines;
-		bufferIndex = -1;
+		bufferIndex = 0;
 	} else {
 		// Or clear lines
 		allLines.length = 0;
@@ -799,7 +799,7 @@ ls.setOpt = function(opt) {
 			enabled: true,
 			maxWidth: 133,
 			maxRows: 38,
-			step: 0
+			wrap: true
 		}
 	};
 
@@ -886,12 +886,32 @@ ls._add({
 
 /* cache navigation */
 
-function _searchLines(lines, searchArg, index, increment) {
-	var max = lines.length;
-	for (; 0 <= index && index < max; index += increment) {
-		if (lines[index].indexOf(searchArg) !== -1) {
-			return index;
+function _searchLines(lines, searchArg, index, increment, doWrap) {
+	var max = lines.length,
+		i = index;
+	while (1) {
+		if (i < 0) {
+			if (doWrap) {
+				i += lines.length;
+			} else {
+				break;
+			}
+		} else if (i >= max) {
+			if (doWrap) {
+				i -= lines.length;
+			} else {
+				break;
+			}
 		}
+		if (doWrap && i === index - increment) {
+			// all round
+			break;
+		}
+
+		if (lines[i].indexOf(searchArg) !== -1) {
+			return i;
+		}
+		i += increment;
 	}
 	return -1;
 }
@@ -904,6 +924,7 @@ function bufferNavigate(action, fromRow) {
 		numRows = (bufOpts.maxRows || options.maxRows) - 1,
 		numRowsTop = ~~(numRows/2),
 		isAbsolute = isNumber(fromRow),
+		doWrap = bufOpts.wrap,
 		currentIndex,
 		searchIndex,
 		bufferLength,
@@ -924,7 +945,7 @@ function bufferNavigate(action, fromRow) {
 			case "String":
 			case "RegExp":
 				searchIndex = !isAbsolute && (bufferIndex === currentIndex) ? currentIndex + 1 : currentIndex;
-				searchIndex = _searchLines(buffer, action, searchIndex, 1);
+				searchIndex = _searchLines(buffer, action, searchIndex, 1, doWrap);
 				if (searchIndex !== -1) {
 					// Found it
 					currentIndex = searchIndex;
@@ -940,9 +961,17 @@ function bufferNavigate(action, fromRow) {
 			case "Number":
 				currentIndex += action;
 				if (currentIndex < 0) {
-					currentIndex = 0;
+					if (doWrap) {
+						currentIndex += bufferLength;
+					} else {
+						currentIndex = 0;
+					}
 				} else if (currentIndex >= bufferLength) {
-					currentIndex = bufferLength - 1;
+					if (doWrap) {
+						currentIndex -= bufferLength;
+					} else {
+						currentIndex = bufferLength - 1;
+					}
 				}
 				status = "Moved to " + currentIndex;
 				break;
