@@ -40,8 +40,8 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 
 var regFnArgs = /(\([^)]*\))/,
 	privateTestEntry = {},
-	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
-	allColumns = ['index','name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
+	msgNav = '[From %s to %s of %s] ',
+	allColumns = ['name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
 	LARGE = 'large',
@@ -91,7 +91,6 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		isCircular = blackList.indexOf(value) !== -1;
 		previousDescrLength = descr.length;
 		entry = {
-			index: descr.length,
 			kind: kind,
 			type: typeOf(value),
 			isPrivate: (parent && parent.isPrivate) || isPrivate,
@@ -595,38 +594,26 @@ function createOptions(defaultOptions, args, index) {
  */
 function ls(target) {
 	var descriptions,
-		descriptionsToPrint,
-		rowStart,
-		rowEnd,
+		descriptionsLength,
+		chopAt,
 		fnDescriptionToLine,
 		options = createOptions(ls.opt, arguments),
 		columnDescriptions,
 		columnWidths = {},
 		cols,
 		maxRows = options.maxRows,
+		bufferEnabled = options.buffer.enabled,
 		allLines = [],
 		sprintfString,
-		i = 0, el, max;
+		i,
+		el;
 	// Merge arguments into options
 
 	// Sort all required descriptions
 	cols = options.show;
 	descriptions = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
 	descriptions.sort(sortDescriptions.bind(null, options.sort));
-
-	// Truncate excess
-	if (maxRows && Math.abs(maxRows) < descriptions.length) {
-		if (maxRows > 0) {
-			rowStart = 0;
-			rowEnd = maxRows;
-		} else {
-			rowStart = descriptions.length + maxRows;
-			rowEnd = descriptions.length;
-		}
-		descriptionsToPrint = descriptions.slice(rowStart, rowEnd);
-	} else {
-		descriptionsToPrint = descriptions;
-	}
+	descriptionsLength = descriptions.length;
 
 	// Create properly sized print method
 	i = 0;
@@ -634,7 +621,7 @@ function ls(target) {
 		columnWidths[el] = el.length;
 	}
 	i = 0;
-	while (el = descriptionsToPrint[i++]) {
+	while (el = descriptions[i++]) {
 		getColumnWidths(cols, columnWidths, el);
 	}
 	columnDescriptions = createColumnDescriptions(cols, columnWidths);
@@ -650,25 +637,48 @@ function ls(target) {
 	}
 	delete options.force;
 	i = 0;
-	while (el = descriptionsToPrint[i++]) {
+	while (el = descriptions[i++]) {
 		fnDescriptionToLine(el);
+
+		// w/o bufferEnabled, check for fast chop
+		if (!bufferEnabled && maxRows && allLines.length > maxRows) {
+			chopAt = allLines.length = maxRows;
+			break;
+		}
+	}
+
+	// w/ bufferEnabled, check for chop
+	if (bufferEnabled && maxRows && maxRows < allLines.length) {
+		chopAt = maxRows;
+	}
+
+	// If subset, add end message
+	if (!options.quiet && chopAt) {
+		// Last row is status message
+		allLines[chopAt - 1] = sprintf(msgNav, 0, chopAt - 2, descriptions.length);
 	}
 
 	// Clear immediately
-	descriptionsToPrint.length = descriptions.length = 0;
-
-	// If subset, add end message
-	if (!options.quiet && (rowStart || rowEnd)) {
-		allLines.push(sprintf(msgDisplaySubset, rowStart, rowEnd - 1, descriptions.length));
-	}
+	descriptions.length = 0;
 
 	// Print lines
-	printLines(allLines, options);
-	buffer = allLines;
-	bufferIndex = 0;
+	if (chopAt && bufferEnabled) {
+		printLines(allLines.slice(0, chopAt), options);
+	} else {
+		printLines(allLines, options);
+	}
+
+	if (bufferEnabled) {
+		// Either store lines into buffer
+		buffer = allLines;
+		bufferIndex = -1;
+	} else {
+		// Or clear lines
+		allLines.length = 0;
+	}
 }
 
-ls.setOpt = function(overrideConfig) {
+ls.setOpt = function(opt) {
 	var c = console, args = arguments, defaultOptions = {
 		/**
 		 * Prefix used for name paths
@@ -783,6 +793,13 @@ ls.setOpt = function(overrideConfig) {
 		 */
 		definePrivate: function(value, key, source) {
 			return key[0] === "_";
+		},
+
+		buffer: {
+			enabled: true,
+			maxWidth: 133,
+			maxRows: 38,
+			step: 0
 		}
 	};
 
@@ -794,7 +811,7 @@ ls.setOpt();
 
 /* additional API methods */
 
-ls.watch = function(value) {
+ls.cat = function(value) {
 	value = { '': value };
 	var catOptions = {
 		value: {
@@ -879,15 +896,17 @@ function _searchLines(lines, searchArg, index, increment) {
 	return -1;
 }
 
-function bufferNavigate(action, moveTo) {
+function bufferNavigate(action, fromRow) {
 	var arr,
 		options = createOptions(ls.opt, arguments, 2),
-		absolute = isNumber(moveTo),
-		index,
-		bufferLength,
-		numRows = 38 - 1,
+		bufOpts = options.buffer,
+		defaultStep = bufOpts.step || 0,
+		numRows = (bufOpts.maxRows || options.maxRows) - 1,
 		numRowsTop = ~~(numRows/2),
-		line,
+		isAbsolute = isNumber(fromRow),
+		currentIndex,
+		searchIndex,
+		bufferLength,
 		status = '',
 		rangeStart,
 		rangeEnd;
@@ -896,47 +915,58 @@ function bufferNavigate(action, moveTo) {
 		arr = ['No buffer present to browse'];
 	} else {
 		bufferLength = buffer.length;
+		if (isAbsolute) {
+			currentIndex = fromRow < 0 ? bufferLength + fromRow : fromRow;
+		} else {
+			currentIndex = bufferIndex;
+		}
 		switch (typeOf(action)) {
 			case "String":
 			case "RegExp":
-				index = absolute ? moveTo : bufferIndex + 1;
-				index = _searchLines(buffer, action, index, 1);
-				if (index !== -1) {
-					bufferIndex = index;
-					status = "Found " + action + " at " + index;
+				searchIndex = !isAbsolute && (bufferIndex === currentIndex) ? currentIndex + 1 : currentIndex;
+				searchIndex = _searchLines(buffer, action, searchIndex, 1);
+				if (searchIndex !== -1) {
+					// Found it
+					currentIndex = searchIndex;
+					status = "Found " + action + " at " + searchIndex;
 				} else {
 					status = "Did not find " + action;
 				}
 				break;
+			// Anything non-parseable becomes a move with default step
 			default:
-				action = 10;
+				action = defaultStep;
 			// Fallthrough
 			case "Number":
-				if (absolute) {
-					bufferIndex = moveTo;
+				currentIndex += action;
+				if (currentIndex < 0) {
+					currentIndex = 0;
+				} else if (currentIndex >= bufferLength) {
+					currentIndex = bufferLength - 1;
 				}
-				bufferIndex += action;
-				if (bufferIndex < 0) {
-					bufferIndex = 0;
-				} else if (bufferIndex >= bufferLength) {
-					bufferIndex = bufferLength - 1;
-				}
-				status = "Moved to " + bufferIndex;
+				status = "Moved to " + currentIndex;
 				break;
 		}
 
 		// Range select
-		rangeStart = Math.max(0, Math.min(bufferIndex - numRowsTop, bufferLength - numRows));
+		rangeStart = Math.max(0, Math.min(currentIndex - numRowsTop, bufferLength - numRows));
 		rangeEnd = Math.min(rangeStart + numRows, bufferLength);
 		arr = buffer.slice(rangeStart, rangeEnd);
 
 		// Marker
-		if (line = arr[bufferIndex - rangeStart]) {
-			arr[bufferIndex - rangeStart] = line.replace(/  /g, ' *') + ' * * *';
+		if (arr[currentIndex - rangeStart]) {
+			arr[currentIndex - rangeStart] = arr[currentIndex - rangeStart].replace(/  /g, ' *') + ' * * *';
 		}
 
 		// Status text
-		arr.push('[From ' + rangeStart + " to " + (rangeEnd - 1) + " of " + bufferLength + '] ' + status);
+		arr.push(sprintf(msgNav, rangeStart, rangeEnd -1, bufferLength) + status);
+
+		// Save current index
+		bufferIndex = currentIndex;
+	}
+	// printLines must chop off this
+	if (isNumber(bufOpts.maxWidth)) {
+		options.maxWidth = bufOpts.maxWidth;
 	}
 	printLines(arr, options);
 }
