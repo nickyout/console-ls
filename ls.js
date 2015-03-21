@@ -42,6 +42,8 @@ var regFnArgs = /(\([^)]*\))/,
 	privateTestEntry = {},
 	msgDisplaySubset = "\nDisplayed [%s..%s] of %s results",
 	allColumns = ['index','name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
+	buffer = null,
+	bufferIndex = 0,
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
@@ -75,7 +77,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			// Probably worth the extra check
 			privateTestEntry.isPrivate = isPrivate;
 			if (!filterDescription.call(options, privateTestEntry)) {
-				return descr;
+				continue;
 			}
 		}
 		owner = target;
@@ -97,7 +99,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			lsLeaf: false,
 			name: namePrefix + name,
 			_value: value,
-			value: '',
+			value: isCircular ? "[Circular]" : stringify(value, options) + '',
 			owner: owner,
 			ownerDepth: ownerDepth,
 			className: ownerCtorName
@@ -174,11 +176,23 @@ function getColumnWidths(keys, columnWidths, el) {
 /**
  * Prints a property description using the log function in options.
  * Chops off line if it is too long.
- * @param line
+ * @param {Array} lines
+ * @param {Object} options
  */
-function printLine(line) {
-	var options = this;
-	options.log(_chop(line, options.maxWidth, options.maxWidthChar));
+function printLines(lines, options) {
+	console.clear && console.clear();
+	if (!isArray(lines)) {
+		lines = [lines];
+	}
+	var i = -1,
+		max = lines.length,
+		log = options.log,
+		maxWidth = options.maxWidth,
+		maxWidthChar = options.maxWidthChar;
+	while (++i < max) {
+		log(_chop(lines[i], maxWidth, maxWidthChar));
+	}
+
 }
 
 /**
@@ -318,6 +332,8 @@ function _stringifyFunction(value, options) {
 			str += value;
 			if (!indent) {
 				str = str.replace(/\s*\n\s*/gm, ' ');
+			} else {
+				str = str.replace(/\t/gm, indent);
 			}
 			break;
 		case MEDIUM:
@@ -429,9 +445,12 @@ function createSprintfString(columnDescriptions) {
 	return arr.join(options.columnSep);
 }
 
-function createOptions(defaultOptions, args) {
+function createOptions(defaultOptions, args, index) {
+	if (index === undefined) {
+		index = 1;
+	}
 	var options = {},
-		i = 0,
+		i = index - 1,
 		max = args.length,
 		arg,
 		value,
@@ -593,15 +612,6 @@ function ls(target) {
 	// Sort all required descriptions
 	cols = options.show;
 	descriptions = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
-	i = 0;
-	while (el = descriptions[i++]) {
-		if (el.isCircular) {
-			el.value = '[Circular]';
-		} else {
-			el.value = stringify(el._value, options) + '';
-		}
-	}
-	//descr = descr.filter(filterDescription.bind(options));
 	descriptions.sort(sortDescriptions.bind(null, options.sort));
 
 	// Truncate excess
@@ -653,11 +663,9 @@ function ls(target) {
 	}
 
 	// Print lines
-	i = -1;
-	max = allLines.length;
-	while (++i < max) {
-		printLine.call(options, allLines[i]);
-	}
+	printLines(allLines, options);
+	buffer = allLines;
+	bufferIndex = 0;
 }
 
 ls.reset = function() {
@@ -858,6 +866,75 @@ ls._add({
 	"rgrep":{ r: 0, filter: { lsLeaf: true }, value: { function: LARGE, indent: '', maxWidth: 0 } },
 	"jsonPath": { nameSep: '/', namePrefix: '/' }
 });
+
+/* cache navigation */
+
+function _searchLines(lines, searchArg, index, increment) {
+	var max = lines.length - 1;
+	for (; 0 <= index && index < max; index += increment) {
+		if (lines[index].indexOf(searchArg) !== -1) {
+			return index;
+		}
+	}
+	return -1;
+}
+
+function bufferNavigate(moveTo, absolute) {
+	var arr,
+		options = createOptions(ls.o, arguments, 2),
+		index,
+		bufferLength,
+		numRows = 38 - 1,
+		numRowsTop = ~~(numRows/2),
+		line,
+		status = '',
+		rangeStart,
+		rangeEnd;
+	if (!buffer) {
+		arr = ['No buffer present to browse'];
+	} else {
+		bufferLength = buffer.length;
+		switch (typeOf(moveTo)) {
+			case "String":
+			case "RegExp":
+				index = absolute ? 0 : bufferIndex + 1;
+				index = _searchLines(buffer, moveTo, index, 1);
+				if (index !== -1) {
+					bufferIndex = index;
+					status = "Found " + moveTo + " at " + index;
+				} else {
+					status = "Did not find " + moveTo;
+				}
+				break;
+			default:
+				moveTo = 10;
+			// Fallthrough
+			case "Number":
+				if (absolute) {
+					bufferIndex = moveTo;
+				} else {
+					bufferIndex += moveTo;
+				}
+				if (bufferIndex < 0) {
+					bufferIndex = 0;
+				} else if (bufferIndex >= bufferLength) {
+					bufferIndex = bufferLength - 1;
+				}
+				status = "Moved to " + bufferIndex;
+				break;
+		}
+		rangeStart = Math.max(0, Math.min(bufferIndex - numRowsTop, bufferLength - numRows));
+		rangeEnd = Math.min(rangeStart + numRows, bufferLength);
+		arr = buffer.slice(rangeStart, rangeEnd);
+		if (line = arr[bufferIndex - rangeStart]) {
+			arr[bufferIndex - rangeStart] = line.replace(/  /g, ' *') + ' * * *';
+		}
+		arr.push('[From ' + rangeStart + " to " + rangeEnd + " of " + bufferLength + '] ' + status);
+	}
+	printLines(arr, options);
+}
+
+ls.b = bufferNavigate;
 
 /* ...and export! */
 
