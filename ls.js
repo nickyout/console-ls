@@ -40,7 +40,12 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 
 var regFnArgs = /(\([^)]*\))/,
 	privateTestEntry = {},
+	msgNoBuffer = 'No buffer present to browse',
 	msgNav = '[From %s to %s of %s] ',
+	msgFound = "Found %s at %s",
+	msgNotFound = "Did not find %s",
+	msgMoved = "Moved to %s",
+	msgExists = "Property %s already exists",
 	allColumns = ['name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
@@ -869,7 +874,7 @@ ls._add = function(key, options) {
 			ls._add(name, key[name])
 		}
 	} else if (ls[key]) {
-		ls.opt.log(sprintf("Property %s already exists", key));
+		ls.opt.log(sprintf(msgExists, key));
 	} else {
 		lsShortcuts[key] = options;
 		_addRecursive(ls, Object.keys(lsShortcuts), []);
@@ -921,7 +926,7 @@ function bufferNavigate(action, fromRow) {
 		options = createOptions(ls.opt, arguments, 2),
 		bufOpts = options.buffer,
 		defaultStep = bufOpts.step || 0,
-		numRows = (bufOpts.maxRows || options.maxRows) - 1,
+		numRows = (isNumber(bufOpts.maxRows) ? bufOpts.maxRows : options.maxRows) - 1,
 		numRowsTop = ~~(numRows/2),
 		isAbsolute = isNumber(fromRow),
 		doWrap = bufOpts.wrap,
@@ -933,7 +938,7 @@ function bufferNavigate(action, fromRow) {
 		rangeEnd;
 
 	if (!buffer) {
-		arr = ['No buffer present to browse'];
+		arr = [msgNoBuffer];
 	} else {
 		bufferLength = buffer.length;
 		if (isAbsolute) {
@@ -949,9 +954,9 @@ function bufferNavigate(action, fromRow) {
 				if (searchIndex !== -1) {
 					// Found it
 					currentIndex = searchIndex;
-					status = "Found " + action + " at " + searchIndex;
+					status = sprintf(msgFound, action, searchIndex);
 				} else {
-					status = "Did not find " + action;
+					status = sprintf(msgNotFound, action);
 				}
 				break;
 			// Anything non-parseable becomes a move with default step
@@ -973,7 +978,7 @@ function bufferNavigate(action, fromRow) {
 						currentIndex = bufferLength - 1;
 					}
 				}
-				status = "Moved to " + currentIndex;
+				status = sprintf(msgMoved, currentIndex);
 				break;
 		}
 
