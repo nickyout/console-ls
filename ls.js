@@ -599,7 +599,7 @@ function ls(target) {
 		rowStart,
 		rowEnd,
 		fnDescriptionToLine,
-		options = createOptions(ls.o, arguments),
+		options = createOptions(ls.opt, arguments),
 		columnDescriptions,
 		columnWidths = {},
 		cols,
@@ -668,9 +668,8 @@ function ls(target) {
 	bufferIndex = 0;
 }
 
-ls.reset = function() {
-	var c = console;
-	ls.o = {
+ls.setOpt = function(overrideConfig) {
+	var c = console, args = arguments, defaultOptions = {
 		/**
 		 * Prefix used for name paths
 		 * @type {String}
@@ -785,16 +784,17 @@ ls.reset = function() {
 		definePrivate: function(value, key, source) {
 			return key[0] === "_";
 		}
-
 	};
+
+	ls.opt = args.length > 0 ? createOptions(defaultOptions, args, 0) : defaultOptions;
 };
 
 // Sets defaults
-ls.reset();
+ls.setOpt();
 
 /* additional API methods */
 
-ls.cat = function(value) {
+ls.watch = function(value) {
 	value = { '': value };
 	var catOptions = {
 		value: {
@@ -852,7 +852,7 @@ ls._add = function(key, options) {
 			ls._add(name, key[name])
 		}
 	} else if (ls[key]) {
-		ls.o.log(sprintf("Property %s already exists", key));
+		ls.opt.log(sprintf("Property %s already exists", key));
 	} else {
 		lsShortcuts[key] = options;
 		_addRecursive(ls, Object.keys(lsShortcuts), []);
@@ -870,7 +870,7 @@ ls._add({
 /* cache navigation */
 
 function _searchLines(lines, searchArg, index, increment) {
-	var max = lines.length - 1;
+	var max = lines.length;
 	for (; 0 <= index && index < max; index += increment) {
 		if (lines[index].indexOf(searchArg) !== -1) {
 			return index;
@@ -879,9 +879,10 @@ function _searchLines(lines, searchArg, index, increment) {
 	return -1;
 }
 
-function bufferNavigate(moveTo, absolute) {
+function bufferNavigate(action, moveTo) {
 	var arr,
-		options = createOptions(ls.o, arguments, 2),
+		options = createOptions(ls.opt, arguments, 2),
+		absolute = isNumber(moveTo),
 		index,
 		bufferLength,
 		numRows = 38 - 1,
@@ -890,31 +891,31 @@ function bufferNavigate(moveTo, absolute) {
 		status = '',
 		rangeStart,
 		rangeEnd;
+
 	if (!buffer) {
 		arr = ['No buffer present to browse'];
 	} else {
 		bufferLength = buffer.length;
-		switch (typeOf(moveTo)) {
+		switch (typeOf(action)) {
 			case "String":
 			case "RegExp":
-				index = absolute ? 0 : bufferIndex + 1;
-				index = _searchLines(buffer, moveTo, index, 1);
+				index = absolute ? moveTo : bufferIndex + 1;
+				index = _searchLines(buffer, action, index, 1);
 				if (index !== -1) {
 					bufferIndex = index;
-					status = "Found " + moveTo + " at " + index;
+					status = "Found " + action + " at " + index;
 				} else {
-					status = "Did not find " + moveTo;
+					status = "Did not find " + action;
 				}
 				break;
 			default:
-				moveTo = 10;
+				action = 10;
 			// Fallthrough
 			case "Number":
 				if (absolute) {
 					bufferIndex = moveTo;
-				} else {
-					bufferIndex += moveTo;
 				}
+				bufferIndex += action;
 				if (bufferIndex < 0) {
 					bufferIndex = 0;
 				} else if (bufferIndex >= bufferLength) {
@@ -923,18 +924,24 @@ function bufferNavigate(moveTo, absolute) {
 				status = "Moved to " + bufferIndex;
 				break;
 		}
+
+		// Range select
 		rangeStart = Math.max(0, Math.min(bufferIndex - numRowsTop, bufferLength - numRows));
 		rangeEnd = Math.min(rangeStart + numRows, bufferLength);
 		arr = buffer.slice(rangeStart, rangeEnd);
+
+		// Marker
 		if (line = arr[bufferIndex - rangeStart]) {
 			arr[bufferIndex - rangeStart] = line.replace(/  /g, ' *') + ' * * *';
 		}
-		arr.push('[From ' + rangeStart + " to " + rangeEnd + " of " + bufferLength + '] ' + status);
+
+		// Status text
+		arr.push('[From ' + rangeStart + " to " + (rangeEnd - 1) + " of " + bufferLength + '] ' + status);
 	}
 	printLines(arr, options);
 }
 
-ls.b = bufferNavigate;
+ls.q = bufferNavigate;
 
 /* ...and export! */
 
