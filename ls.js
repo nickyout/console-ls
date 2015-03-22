@@ -181,23 +181,24 @@ function getColumnWidths(keys, columnWidths, el) {
 /**
  * Prints a property description using the log function in options.
  * Chops off line if it is too long.
- * @param {Array} lines
+ * @param {String|Array} lines
  * @param {Object} options
  */
 function printLines(lines, options) {
-	console.clear && console.clear();
 	if (!isArray(lines)) {
 		lines = [lines];
 	}
 	var i = -1,
 		max = lines.length,
 		log = options.log,
+		clear = options.clear,
 		maxWidth = options.maxWidth,
-		maxWidthChar = options.maxWidthChar,
+		chopChar = options.chopChar,
 		printStr = '';
 	while (++i < max) {
-		printStr += (printStr && '\n') + _chop(lines[i], maxWidth, maxWidthChar);
+		printStr += (printStr && '\n') + _chop(lines[i], maxWidth, chopChar);
 	}
+	clear && clear();
 	log(printStr);
 
 }
@@ -246,7 +247,7 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 		iterValue,
 		valueFormat = options.value,
 		maxWidth = valueFormat.maxWidth,
-		maxWidthChar = options.maxWidthChar,
+		chopChar = options.chopChar,
 		indent,
 		iterPrefix;
 	switch (isArr ? valueFormat.array : valueFormat.object) {
@@ -286,7 +287,7 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 				iterValue = value[iter[i]];
 			}
 			str += stringify(iterValue, options, prefix + indent, blackList, depth-1);
-			if (str !== (str = _chop(str, maxWidth && (maxWidth - 2), maxWidthChar))) {
+			if (str !== (str = _chop(str, maxWidth && (maxWidth - 2), chopChar))) {
 				break;
 			}
 			if (i !== iter.length -1) {
@@ -299,7 +300,7 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 	} else {
 		if (isNonEmpty) {
 			// What lies inside remains a mystery...
-			str += maxWidthChar;
+			str += chopChar;
 		}
 	}
 	str += isArr ? ']' : '}';
@@ -312,16 +313,16 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
  * If maxWidth is 0, no chopping happens.
  * @param {String} str - the string to chop
  * @param {Number} [maxWidth=0] - the size limit. If negative, chops from the other beginning
- * @param {String} [maxWidthChar=''] - the string placed where the chopping occurred.
+ * @param {String} [chopChar=''] - the string placed where the chopping occurred.
  * @return {String} the resulting string
  */
-function _chop(str, maxWidth, maxWidthChar) {
-	maxWidthChar || (maxWidthChar = '');
+function _chop(str, maxWidth, chopChar) {
+	chopChar || (chopChar = '');
 	if (maxWidth && str.length > Math.abs(maxWidth)) {
 		if (maxWidth < 0) {
-			return maxWidthChar + str.substr(maxWidth + maxWidthChar.length)
+			return chopChar + str.substr(maxWidth + chopChar.length)
 		} else {
-			return str.substr(0, maxWidth - maxWidthChar.length) + maxWidthChar;
+			return str.substr(0, maxWidth - chopChar.length) + chopChar;
 		}
 	}
 	return str;
@@ -333,7 +334,7 @@ function _stringifyFunction(value, options) {
 		valueFormat = options.value,
 		indent = valueFormat.indent,
 		maxWidth = valueFormat.maxWidth,
-		maxWidthChar = options.maxWidthChar;
+		chopChar = options.chopChar;
 	switch (valueFormat.function) {
 		case LARGE:
 			str += value;
@@ -354,7 +355,7 @@ function _stringifyFunction(value, options) {
 		default:
 			return '';
 	}
-	return _chop(str, maxWidth, maxWidthChar);
+	return _chop(str, maxWidth, chopChar);
 }
 
 /**
@@ -372,7 +373,7 @@ function stringify(value, options, prefix, blackList, depth) {
 		valueFormat = options.value,
 		defaultFormat = valueFormat.default,
 		maxWidth = valueFormat.maxWidth,
-		maxWidthChar = options.maxWidthChar;
+		chopChar = options.chopChar;
 	switch (typeof value) {
 		case "function":
 			return _stringifyFunction(value, options);
@@ -395,7 +396,7 @@ function stringify(value, options, prefix, blackList, depth) {
 		default:
 			str = "" + value;
 	}
-	str = _chop(str, maxWidth, maxWidthChar);
+	str = _chop(str, maxWidth, chopChar);
 	// Unless default format is large, remove newlines
 	if (defaultFormat !== LARGE) {
 		str = str.replace(regNewline, ' ');
@@ -489,7 +490,7 @@ function createOptions(defaultOptions, args, index) {
 		if (arg.value && !isPlainObject(arg.value)) {
 			arg.value = { default: arg.value };
 		}
-		if (arg.filter && !isPlainObject(arg.filter)) {
+		if (arg.filter !== undefined && !isPlainObject(arg.filter)) {
 			arg.filter = { name: arg.filter };
 		}
 		merge(options, arg);
@@ -614,7 +615,7 @@ function ls(target) {
 		columnDescriptions,
 		columnWidths = {},
 		cols,
-		maxRows = options.maxRows,
+		maxHeight = options.maxHeight,
 		bufferEnabled = options.buffer.enabled,
 		allLines = [],
 		sprintfString,
@@ -656,15 +657,15 @@ function ls(target) {
 		fnDescriptionToLine(el);
 
 		// w/o bufferEnabled, check for fast chop
-		if (!bufferEnabled && maxRows && allLines.length > maxRows) {
-			chopAt = allLines.length = maxRows;
+		if (!bufferEnabled && maxHeight && allLines.length > maxHeight) {
+			chopAt = allLines.length = maxHeight;
 			break;
 		}
 	}
 
 	// w/ bufferEnabled, check for chop
-	if (bufferEnabled && maxRows && maxRows < allLines.length) {
-		chopAt = maxRows;
+	if (bufferEnabled && maxHeight && maxHeight < allLines.length) {
+		chopAt = maxHeight;
 	}
 
 	// If subset, add end message
@@ -726,12 +727,12 @@ ls.setOpt = function(opt) {
 		 * @type {String}
 		 * @see module:console-ls#maxWidth
 		 */
-		maxWidthChar: '..',
+		chopChar: '..',
 		/**
 		 * Set maximum number of output rows.
 		 * @type {Number}
 		 */
-		maxRows: 0,
+		maxHeight: 0,
 		/**
 		 * If true, only the result is printed (no headers etc).
 		 * @type {Boolean}
@@ -787,6 +788,10 @@ ls.setOpt = function(opt) {
 		 */
 		log: c && c.log && c.log.bind(c),
 		/**
+		 * Clear function. In case you want your console cleared before logging.
+		 */
+		clear: c && c.clear && c.clear.bind(c),
+		/**
 		 * Dictates how the value of "kind" gets derived
 		 * @param {*} value
 		 * @param {String} key
@@ -817,7 +822,7 @@ ls.setOpt = function(opt) {
 		buffer: {
 			enabled: true,
 			maxWidth: 133,
-			maxRows: 38,
+			maxHeight: 38,
 			wrap: true
 		}
 	};
@@ -888,7 +893,7 @@ ls._add = function(key, options) {
 			ls._add(name, key[name])
 		}
 	} else if (ls[key]) {
-		ls.opt.log(sprintf(msgExists, key));
+		printLines(sprintf(msgExists, key), ls.opt);
 	} else {
 		lsShortcuts[key] = options;
 		_addRecursive(ls, Object.keys(lsShortcuts), []);
@@ -896,11 +901,25 @@ ls._add = function(key, options) {
 };
 
 ls._add({
-	"find": { r: 0, show: 'name', sort: 'name', value: { function: NONE, object: NONE, array: NONE } },
-	"a":	{ filter: { isPrivate: undefined } },
-	"doc":	{ show: ['className', 'kind', 'name', 'type', 'value'], sort: ['className', '-kind', 'name'] },
-	"rgrep":{ r: 0, show: ['name', 'value'], filter: { lsLeaf: true }, value: { function: LARGE, indent: '', maxWidth: 0 } },
-	"jsonPath": { nameSep: '/', namePrefix: '/' }
+	"find": {
+		r: 0,
+		show: 'name',
+		sort: 'name',
+		value: { function: NONE, object: NONE, array: NONE }
+	},
+	"a":	{
+		filter: { isPrivate: undefined }
+	},
+	"doc":	{
+		show: ['className', 'kind', 'name', 'type', 'value'],
+		sort: ['className', '-kind', 'name']
+	},
+	"rgrep":{
+		r: 0,
+		show: ['name', 'value'],
+		filter: { lsLeaf: true },
+		value: { function: LARGE, indent: '', maxWidth: 0 }
+	}
 });
 
 /* cache navigation */
@@ -940,7 +959,7 @@ function bufferNavigate(action, fromRow) {
 		options = createOptions(ls.opt, arguments, 2),
 		bufOpts = options.buffer,
 		defaultStep = bufOpts.step || 0,
-		numRows = (isNumber(bufOpts.maxRows) ? bufOpts.maxRows : options.maxRows) - 1,
+		numRows = (isNumber(bufOpts.maxHeight) ? bufOpts.maxHeight : options.maxHeight) - 1,
 		numRowsTop = ~~(numRows/2),
 		isAbsolute = isNumber(fromRow),
 		doWrap = bufOpts.wrap,
