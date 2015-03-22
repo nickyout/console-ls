@@ -192,10 +192,12 @@ function printLines(lines, options) {
 		max = lines.length,
 		log = options.log,
 		maxWidth = options.maxWidth,
-		maxWidthChar = options.maxWidthChar;
+		maxWidthChar = options.maxWidthChar,
+		printStr = '';
 	while (++i < max) {
-		log(_chop(lines[i], maxWidth, maxWidthChar));
+		printStr += (printStr && '\n') + _chop(lines[i], maxWidth, maxWidthChar);
 	}
+	log(printStr);
 
 }
 
@@ -610,6 +612,8 @@ function ls(target) {
 		bufferEnabled = options.buffer.enabled,
 		allLines = [],
 		sprintfString,
+		lines,
+		chopMsg,
 		i,
 		el;
 	// Merge arguments into options
@@ -660,18 +664,22 @@ function ls(target) {
 	// If subset, add end message
 	if (!options.quiet && chopAt) {
 		// Last row is status message
-		allLines[chopAt - 1] = sprintf(msgNav, 0, chopAt - 2, descriptions.length);
+		chopMsg = sprintf(msgNav, 0, chopAt - 2, descriptions.length);
 	}
 
 	// Clear immediately
 	descriptions.length = 0;
 
 	// Print lines
-	if (chopAt && bufferEnabled) {
-		printLines(allLines.slice(0, chopAt), options);
+	if (chopAt) {
+		lines = bufferEnabled ? allLines.slice(0, chopAt) : allLines;
+		if (!options.quiet) {
+			lines[chopAt - 1] = chopMsg;
+		}
 	} else {
-		printLines(allLines, options);
+		lines = allLines;
 	}
+	printLines(lines, options);
 
 	if (bufferEnabled) {
 		// Either store lines into buffer
