@@ -190,7 +190,8 @@ function printLines(lines, options) {
 	}
 	var i = -1,
 		max = lines.length,
-		log = options.log,
+		fnLog = options.fnLog,
+		fnClear = options.fnClear,
 		clear = options.clear,
 		maxWidth = options.maxWidth,
 		chopChar = options.chopChar,
@@ -198,8 +199,10 @@ function printLines(lines, options) {
 	while (++i < max) {
 		printStr += (printStr && '\n') + _chop(lines[i], maxWidth, chopChar);
 	}
-	clear && clear();
-	log(printStr);
+	if (clear) {
+		fnClear && fnClear();
+	}
+	fnLog(printStr);
 
 }
 
@@ -490,7 +493,7 @@ function createOptions(defaultOptions, args, index) {
 		if (arg.value && !isPlainObject(arg.value)) {
 			arg.value = { default: arg.value };
 		}
-		if (arg.filter !== undefined && !isPlainObject(arg.filter)) {
+		if (arg.hasOwnProperty('filter') && !isPlainObject(arg.filter)) {
 			arg.filter = { name: arg.filter };
 		}
 		merge(options, arg);
@@ -786,11 +789,11 @@ ls.setOpt = function(opt) {
 		 * Output function. Default is console.log.
 		 * @type {Function}
 		 */
-		log: c && c.log && c.log.bind(c),
+		fnLog: c && c.log && c.log.bind(c),
 		/**
 		 * Clear function. In case you want your console cleared before logging.
 		 */
-		clear: c && c.clear && c.clear.bind(c),
+		fnClear: c && c.clear && c.clear.bind(c),
 		/**
 		 * Dictates how the value of "kind" gets derived
 		 * @param {*} value
@@ -818,12 +821,18 @@ ls.setOpt = function(opt) {
 		definePrivate: function(value, key, source) {
 			return key[0] === "_";
 		},
+		/**
+		 * Whether or not to clear before logging
+		 * @type {Boolean}
+		 */
+		clear: false,
 
 		buffer: {
 			enabled: true,
 			maxWidth: 133,
 			maxHeight: 38,
-			wrap: true
+			wrap: true,
+			clear: true
 		}
 	};
 
@@ -1034,6 +1043,9 @@ function bufferNavigate(action, fromRow) {
 	// printLines must chop off this
 	if (isNumber(bufOpts.maxWidth)) {
 		options.maxWidth = bufOpts.maxWidth;
+	}
+	if (bufOpts.clear !== undefined) {
+		options.clear = bufOpts.clear;
 	}
 	printLines(arr, options);
 }
