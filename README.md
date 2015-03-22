@@ -197,18 +197,18 @@ The options that are used for a list method call is defined as follows:
 *   Every additional `options` argument gets normalized and is then deep merged with this options object (in order)
 *   The resulting options object is used for the call.
 
-### options
+#### options
 Type: `Object|Number|String|RegExp` Default: `{..}`
 
 An object containing any subset of the possible 'options' properties, which will override the default options during the listing method call for which they were specified.
 A `Number` is shorthand for setting __options.r__. A `String` or `RegExp` is shorthand for setting __options.grep__.
 
-### options.r
+#### options.r
 Type: `Number|Boolean` Default: `1`
 
 Recursion depth. `true`, `0` or less than `0` for exhaustive recursion.
 
-### options.filter
+#### options.filter
 Type: `String|RegExp|Object` Default: `{ isPrivate: false }`
 
 Filter out any property found that does not match this filter. If `Object`, use any column label as key and the value as match string|RegExp. All column values get casted to string and the filter value simply gets fed to `String#search()`. You could also use `Boolean` and `Number`, though they will effectively be casted to string.
@@ -217,51 +217,51 @@ Keep in mind that different filters stack: if `filter.name` is defined in one op
 
 If `String`, `RegExp` or any other non-`Object`, the value becomes the filter value for column `name`.
 
-### options.grep
+#### options.grep
 Type: `String|RegExp` Default: `''`
 
 Filters by line instead of by column. Only the lines that contain this value will be displayed. Matching occurs _before_ lines are chopped (see __options.maxWidth__).
 
-### options.show
+#### options.show
 Type: `String|Array` Default: `["kind", "name", "value"]`
 
 Which columns to show. Use the same name as shown as the label at the top of a column. A string instead of an array becomes the single column to show, unless this string is `"all"`. In this case - you guessed it - all columns are shown. Currently there are: name, value, type, kind, isPrivate, className, isCircular, lsLeaf.
 
-### options.sort
+#### options.sort
 Type: `String|Array` Default: `["-kind", "name", "value"]`
 
 What columns to sort the output on. Names are the same as __options.show__. Always alphabetically. Preceding the name with `-` reverses the sort. Passing a string instead of an array becomes the single column to sort on.
 
-### options.maxHeight
+#### options.maxHeight
 Type: `Number` Default: `0`
 
 Limits number of output lines. If the limit gets exceeded, the output is ended with a line saying which lines you are viewing out of the total number of lines. If `0`, there is no limit and everything gets barfed.
 
-### options.maxWidth
+#### options.maxWidth
 Type: `Number` Default: `0`
 
 Limits the width of a line in number of characters. If the limimt gets exceeded, the line is chopped at the end and the __options.chopChar__ is appended to show that it happened. If `0`, there is no limit and the whole line gets barfed.
 
-### options.chopChar
+#### options.chopChar
 Type: `String` Default: `".."`
 
 Whenever something gets chopped or left out, display this char. Used for chopping lines with `options.maxWidth`, `options.buffer.maxWidth` and `options.value.mediumDepth`.
 
-### options.nameSep
+#### options.nameSep
 Type: `String` Default: `"."`
 During recursive listing, property names are displayed as paths. This character is used between the names in such a path. It's really just aesthetics.
 
-### options.namePrefix
+#### options.namePrefix
 Type: `String` Default: `""`
 Every property name gets this string before it. Aesthetics.
 
-### options.value
+#### options.value
 Type: `String|Object` Default: `{..}`
 
 Defines several display options for the _value_ column.
 If `String`, the value is used to set __options.value.default__.
 
-### options.value.default
+#### options.value.default
 Type: `String` Default: `"medium"`
 
 Dictates default display style, which affects how a value gets displayed, depending on the type of value. Possible values are:
@@ -271,33 +271,33 @@ Dictates default display style, which affects how a value gets displayed, depend
 *   `"small"` - Display least. If `Array|Object`, print only their braces. If function, only display `function`. Newlines are not displayed.
 *   `"none"` - Display nothing.
 
-### options.value.function
+#### options.value.function
 Type: `String` Default: `undefined`
 
 Dictates display style for values of type `Function` only. Possible values are the same as for __options.value.default__. If set to `undefined`, uses __options.value.default__ as its value.
 
-### options.value.object
+#### options.value.object
 Type: `String` Default: `undefined`
 
 Dictates display style for values of type `Object` only. Possible values are the same as for __options.value.default__. If set to `undefined`, uses __options.value.default__ as its value. (copied)
 
-### options.value.array
+#### options.value.array
 Type: `String` Default: `undefined`
 
 Dictates display style for values of type `Array` only. Possible values are the same as for __options.value.default__. If set to `undefined`, uses __options.value.default__ as its value. (copied)
 
-### options.value.maxWidth
+#### options.value.maxWidth
 Type: `Number` Default: `40`
 
 Enforces maximum number of characters to display any value, regardless of their display style. Chopped values get the __options.chopChar__ at the place of chopping.
 Keep in mind that value chopping occurs _before_ filtering at the moment. You can no longer search for something that has been chopped...
 
-### options.buffer
+#### options.buffer
 Type: `Object`
 
 (WIP)
 
-### options.quiet
+#### options.quiet
 Type: `Boolean` Default: `false`
 
 Whether or not to show informative strings, like column labels and line truncating notifications (see __options.maxWidth__). Not sure if it is going to be useful unless console-ls is going to be plugged into a bigger system.
