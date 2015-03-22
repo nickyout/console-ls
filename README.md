@@ -8,7 +8,7 @@ Console-ls is a set of tools meant to inspect and search nested objects and inst
 *   Navigate and search long results
 *   Handles circular references (duh)
 *   Can be browserified (duh)
-*   Currently minified to 8K
+*   Currently minified to 9K
 *   Did I say no mouse?
 
 ## Install
