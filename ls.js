@@ -39,6 +39,7 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 /* ls args */
 
 var regFnArgs = /(\([^)]*\))/,
+	regNewline = /\s*\n\s*/gm,
 	privateTestEntry = {},
 	msgNoBuffer = 'No buffer present to browse',
 	msgNav = '[From %s to %s of %s] ',
@@ -337,7 +338,7 @@ function _stringifyFunction(value, options) {
 		case LARGE:
 			str += value;
 			if (!indent) {
-				str = str.replace(/\s*\n\s*/gm, ' ');
+				str = str.replace(regNewline, ' ');
 			} else {
 				str = str.replace(/\t/gm, indent);
 			}
@@ -369,6 +370,7 @@ function stringify(value, options, prefix, blackList, depth) {
 	prefix || (prefix = '');
 	var str,
 		valueFormat = options.value,
+		defaultFormat = valueFormat.default,
 		maxWidth = valueFormat.maxWidth,
 		maxWidthChar = options.maxWidthChar;
 	switch (typeof value) {
@@ -394,6 +396,10 @@ function stringify(value, options, prefix, blackList, depth) {
 			str = "" + value;
 	}
 	str = _chop(str, maxWidth, maxWidthChar);
+	// Unless default format is large, remove newlines
+	if (defaultFormat !== LARGE) {
+		str = str.replace(regNewline, ' ');
+	}
 	return str;
 }
 
@@ -893,7 +899,7 @@ ls._add({
 	"find": { r: 0, show: 'name', sort: 'name', value: { function: NONE, object: NONE, array: NONE } },
 	"a":	{ filter: { isPrivate: undefined } },
 	"doc":	{ show: ['className', 'kind', 'name', 'type', 'value'], sort: ['className', '-kind', 'name'] },
-	"rgrep":{ r: 0, filter: { lsLeaf: true }, value: { function: LARGE, indent: '', maxWidth: 0 } },
+	"rgrep":{ r: 0, show: ['name', 'value'], filter: { lsLeaf: true }, value: { function: LARGE, indent: '', maxWidth: 0 } },
 	"jsonPath": { nameSep: '/', namePrefix: '/' }
 });
 
