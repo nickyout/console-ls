@@ -46,6 +46,7 @@ var regFnArgs = /(\([^)]*\))/,
 	msgFound = "Found %s at %s",
 	msgNotFound = "Did not find %s",
 	msgMoved = "Moved to %s",
+	msgOverflow = " * Iteration limit %s reached. The rest was omitted.",
 	msgExists = "Property %s already exists",
 	allColumns = ['name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
@@ -57,10 +58,18 @@ var regFnArgs = /(\([^)]*\))/,
 
 /* ls utils */
 
+/**
+ *
+ * @param {*} target
+ * @param {Object} options
+ * @param {String} namePrefix
+ * @param {Number} depth
+ * @param {Array} descr
+ * @param {Array} blackList
+ * @param {?*} parent
+ * @returns {*}
+ */
 function getPropertyDescriptions(target, options, namePrefix, depth, descr, blackList, parent) {
-	namePrefix || (namePrefix = '');
-	descr || (descr = []);
-	blackList || (blackList = []);
 	var entry,
 		owner,
 		ownerDepth,
@@ -70,13 +79,20 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		isCircular,
 		isPrivate,
 		previousBlackListLength = blackList.length,
-		previousDescrLength;
+		previousDescrLength,
+		limit = options.iterationLimit;
 
 	if (!isObject(target)) {
 		return descr;
 	}
 	blackList.push(target);
 	for (var name in target) {
+		if (limit && limit <= options._it) {
+			break;
+		} else {
+			options._it++;
+		}
+
 		value = target[name];
 		isPrivate = options.definePrivate(value, name, target);
 		if (options.filter.isPrivate !== undefined) {
@@ -496,6 +512,9 @@ function createOptions(defaultOptions, args, index) {
 		if (arg.hasOwnProperty('filter') && !isPlainObject(arg.filter)) {
 			arg.filter = { name: arg.filter };
 		}
+		if (arg.hasOwnProperty('buffer') && !isPlainObject(arg.buffer)) {
+			arg.buffer = { enabled: arg.buffer };
+		}
 		merge(options, arg);
 	}
 
@@ -524,6 +543,9 @@ function createOptions(defaultOptions, args, index) {
 	value.function || (value.function = value.default);
 	value.object || (value.object = value.default);
 	value.array || (value.array = value.default);
+
+	// Iteration counter. No judge.
+	options._it = 0;
 	return options;
 }
 
@@ -611,7 +633,6 @@ function createOptions(defaultOptions, args, index) {
  */
 function ls(target) {
 	var descriptions,
-		descriptionsLength,
 		chopAt,
 		fnDescriptionToLine,
 		options = createOptions(ls.opt, arguments),
@@ -624,16 +645,23 @@ function ls(target) {
 		sprintfString,
 		lines,
 		chopMsg,
+		limit,
+		limitReached = false,
+		quiet,
 		i,
 		el;
 	// Merge arguments into options
 
 	// Sort all required descriptions
+	limit = options.iterationLimit;
 	cols = options.show;
-	descriptions = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
+	quiet = options.quiet;
+	descriptions = getPropertyDescriptions( target, options, options.namePrefix || '', options.r, [], [], null);
 	descriptions.sort(sortDescriptions.bind(null, options.sort));
-	descriptionsLength = descriptions.length;
 
+	if (limit && limit <= options._it) {
+		limitReached = true;
+	}
 	// Create properly sized print method
 	i = 0;
 	while (el = cols[i++]) {
@@ -649,7 +677,7 @@ function ls(target) {
 
 	// Collect lines
 	// Headers force hack, omit grep :^)
-	if (!options.quiet) {
+	if (!quiet) {
 		options.force = true;
 		fnDescriptionToLine(columnDescriptions.label);
 		fnDescriptionToLine(columnDescriptions.sep);
@@ -666,24 +694,28 @@ function ls(target) {
 		}
 	}
 
+	// Clear immediately
+	descriptions.length = 0;
+
+	if (!quiet && limitReached) {
+		allLines.push(sprintf(msgOverflow, limit));
+	}
+
 	// w/ bufferEnabled, check for chop
 	if (bufferEnabled && maxHeight && maxHeight < allLines.length) {
 		chopAt = maxHeight;
 	}
 
 	// If subset, add end message
-	if (!options.quiet && chopAt) {
+	if (!quiet && chopAt) {
 		// Last row is status message
-		chopMsg = sprintf(msgNav, 0, chopAt - 2, descriptions.length);
+		chopMsg = sprintf(msgNav, 0, chopAt - 2, allLines.length);
 	}
-
-	// Clear immediately
-	descriptions.length = 0;
 
 	// Print lines
 	if (chopAt) {
 		lines = bufferEnabled ? allLines.slice(0, chopAt) : allLines;
-		if (!options.quiet) {
+		if (!quiet) {
 			lines[chopAt - 1] = chopMsg;
 		}
 	} else {
@@ -735,7 +767,7 @@ ls.setOpt = function(opt) {
 		 * Set maximum number of output rows.
 		 * @type {Number}
 		 */
-		maxHeight: 0,
+		maxHeight: 1000,
 		/**
 		 * If true, only the result is printed (no headers etc).
 		 * @type {Boolean}
@@ -826,6 +858,8 @@ ls.setOpt = function(opt) {
 		 * @type {Boolean}
 		 */
 		clear: false,
+
+		iterationLimit: 100000,
 
 		buffer: {
 			enabled: true,
