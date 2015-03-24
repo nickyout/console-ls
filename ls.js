@@ -40,7 +40,6 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 
 var regFnArgs = /(\([^)]*\))/,
 	regNewline = /\s*\n\s*/gm,
-	privateTestEntry = {},
 	msgNoBuffer = 'No buffer present to browse',
 	msgNav = '[From %s to %s of %s] ',
 	msgFound = "Found %s at %s",
@@ -52,12 +51,37 @@ var regFnArgs = /(\([^)]*\))/,
 	buffer = null,
 	bufferIndex = 0,
 	includeTargetObj = {},
+	recycledEntries = [],
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
 	NONE = 'none';
 
 /* ls utils */
+
+function _createEntry(name, value, type, kind, isPrivate, isCircular, owner, ownerDepth, ownerCtorName) {
+	var val = recycledEntries.length > 0 ? recycledEntries.pop() : {};
+	val.name = name;
+	val._value = value;
+	val.value = '';
+	val.type = type;
+	val.kind = kind;
+	val.isPrivate = isPrivate;
+	val.isCircular = isCircular;
+	val.lsLeaf = false;
+	val.owner = owner;
+	val.ownerDepth = ownerDepth;
+	val.className = ownerCtorName;
+	return val;
+}
+
+function _recycleEntry(el) {
+	if (recycledEntries.length < 1000) {
+		el.value = el._value = el.owner = null;
+		// the rest should be ok
+		recycledEntries.push(el);
+	}
+}
 
 /**
  *
@@ -96,12 +120,8 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 
 		value = target[name];
 		isPrivate = options.definePrivate(value, name, target);
-		if (options.filter.isPrivate !== undefined) {
-			// Probably worth the extra check
-			privateTestEntry.isPrivate = isPrivate;
-			if (!filterDescription.call(options, privateTestEntry)) {
-				continue;
-			}
+		if (!filterByValue.call(options, "isPrivate", isPrivate)) {
+			continue;
 		}
 		owner = target;
 		ownerDepth = 0;
@@ -113,19 +133,17 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		kind = options.defineKind(value, name, target);
 		isCircular = blackList.indexOf(value) !== -1;
 		previousDescrLength = descr.length;
-		entry = {
-			kind: kind,
-			type: typeOf(value),
-			isPrivate: (parent && parent.isPrivate) || isPrivate,
-			isCircular: isCircular,
-			lsLeaf: false,
-			name: namePrefix + name,
-			_value: value,
-			value: isCircular ? "[Circular]" : stringify(value, options) + '',
-			owner: owner,
-			ownerDepth: ownerDepth,
-			className: ownerCtorName
-		};
+		entry = _createEntry(
+			namePrefix + name,
+			value,
+			typeOf(value),
+			kind,
+			(parent && parent.isPrivate) || isPrivate,
+			isCircular,
+			owner,
+			ownerDepth,
+			ownerCtorName
+		);
 		if (depth !== 1 && !isCircular) {
 			getPropertyDescriptions(
 				value,
@@ -138,9 +156,21 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			);
 		}
 		entry.lsLeaf = !isCollection(value) || descr.length == previousDescrLength;
+
+		// Prevent unnecessary value making
+		if (!filterByValue.call(options, "lsLeaf", entry.lsLeaf)) {
+			_recycleEntry(entry);
+			continue;
+		}
+
+		// Okay, make the string
+		entry.value = isCircular ? "[Circular]" : stringify(value, options) + '';
+
 		// Option to leave out recursed entirely
 		if (filterDescription.call(options, entry)) {
 			descr.push(entry);
+		} else {
+			_recycleEntry(entry);
 		}
 	}
 	// Truncate elements added in the list during this loop
@@ -171,6 +201,14 @@ function sortDescriptions(arrSort, a,b) {
 	}
 	return returnVal;
 }
+
+function filterByValue(type, value) {
+	var options = this,
+		filter = options.filter;
+
+	return !(filter[type] !== undefined && (value+'').search(filter[type]) === -1)
+}
+
 
 function filterDescription(el){
 	var options = this,
@@ -555,15 +593,19 @@ function createOptions(defaultOptions, args, index) {
  * Description given for each property found.
  * @typedef {Object} module:console-ls~PropertyDefinition
  * @prop {String} name - the property name on the instance
- * @prop {*} value - the property value
- * @prop {String} type - the type of the property value.
- * @prop {String} kind - the interpreted kind of value. Can be "class", "method" or "property"
- * @prop {Boolean} isPrivate - whether or not the property is considered private/protected.
+ * @prop {String} value - the string representation of the property value
+ * @prop {*} _value - the actual value
+ * @prop {String} type - the type of the property value (Object.prototype.toString).
+ * @prop {String} kind - the interpreted kind of value, as defined by <code>options.defineKind</code>.
+ * Can be "class", "method" or "property".
+ * @prop {Boolean} isPrivate - whether or not the property is considered private/protected,
+ * as defined by <code>options.defineKind</code>.
  * @prop {Boolean} isCircular - whether or not its value is also equal one of its parents.
- * Derived from whether or not the property name starts with a _
  * @prop {*} owner - the actual owner of the property. Can be the target itself, or any instance it its prototype chain.
  * @prop {Number} ownerDepth - the depth in the prototype chain at which the owner was found
  * @prop {String} className - the constructor name of the owner, or "(anonymous)" if not found.
+ * @prop {Boolean} lsLeaf - Objects and Arrays which are iterated over get <code>lsLeaf == false </code>. All others
+ * get <code>true</code>. This is used to filter on to prevent redundant display of objects/arrays as values.
  */
 
 /**
@@ -598,39 +640,12 @@ function createOptions(defaultOptions, args, index) {
  */
 
 /**
- * List the contents of any object, array, regexp, function, or derivative. Prints output to <code>console.log</code>.
+ * List the contents of any object, array, regexp, function, or derivative.
+ * Prints output to <code>options.fnLog</code>.
  * @param {Object|Array|RegExp|Function} target - the target to list the contents of
  * @param {...module:console-ls~Options|String|RegExp|Number} [options] - several option specifications are merged into one.
  * If string or regexp, the value is used as used as options.grep.
  * If number, the value is used as options.r.
- * @example
- *
- * ls(u, "property");
- * // kind:      name:                value:
- * // ---------- -------------------- --------------------
- * // property   VERSION              "2.4.1"
- * // property   support              { funcDecomp: true, funcNames: true }
- * // property   templateSettings     { escape: /<%-([\s\S]+?)%>/g, evaluate: /<%([\...}
- * // method     property             function()
- *
- * ls(u, { grep: "property", sort: "kind" });
- * // kind:      name:                value:
- * // ---------- -------------------- --------------------
- * // method     property             function()
- * // property   VERSION              "2.4.1"
- * // property   templateSettings     { escape: /<%-([\s\S]+?)%>/g, evaluate: /<%([\...}
- * // property   support              { funcDecomp: true, funcNames: true }
- *
- * ls(u, { filter: { kind: "property" }, sort: ["kind", "name"] });
- * // kind:      name:                value: * // ---------- -------------------- --------------------
- * // property   VERSION              "2.4.1"
- * // property   support              { funcDecomp: true, funcNames: true }
- * // property   templateSettings     { escape: /<%-([\s\S]+?)%>/g, evaluate: /<%([\...}
- *
- * ls(u, { filter: { isPrivate: "true" }, showPrivate: true, all: true });
- * // kind:      name:                value:               type:      isPrivate: className:
- * // ---------- -------------------- -------------------- ---------- ---------- --------------------
- * // method     _                    function()           Function   true       Function
  * @module {Function} console-ls
  */
 function ls(target) {
