@@ -51,6 +51,7 @@ var regFnArgs = /(\([^)]*\))/,
 	allColumns = ['name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
+	includeTargetObj = {},
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
@@ -224,16 +225,17 @@ function printLines(lines, options) {
 
 /**
  * Converts a propertyDescription into a string or array of strings and adds them to argument `lines`.
- * @param {Array} lines
+ * @param {Array} allLines
  * @param {String} sprintfString
+ * @param {?Function} fnGrep
  * @param {Object} propertyDescription
  * @this {Object} options
  */
-function descriptionToLines(lines, sprintfString, propertyDescription) {
+function descriptionToLines(allLines, sprintfString, fnGrep, propertyDescription) {
 	var options = this,
 		args = [sprintfString],
 		force = options.force,
-		line,
+		lines,
 		i = 0,
 		key;
 
@@ -241,11 +243,11 @@ function descriptionToLines(lines, sprintfString, propertyDescription) {
 	while (key = allColumns[i++]) {
 		args.push(propertyDescription[key]);
 	}
-	line = sprintf.apply(null, args);
-	if (!force && options.grep && line.search(options.grep) === -1) {
-		return;
+	lines = sprintf.apply(null, args).split('\n');
+	if (!force && fnGrep) {
+		lines = lines.filter(fnGrep);
 	}
-	lines.push.apply(lines, line.split('\n'));
+	allLines.push.apply(allLines, lines);
 }
 
 /**
@@ -635,27 +637,32 @@ function ls(target) {
 	var descriptions,
 		chopAt,
 		fnDescriptionToLine,
+		fnGrep,
 		options = createOptions(ls.opt, arguments),
 		columnDescriptions,
 		columnWidths = {},
-		cols,
+		cols = options.show,
 		maxHeight = options.maxHeight,
 		bufferEnabled = options.buffer.enabled,
 		allLines = [],
 		sprintfString,
 		lines,
 		chopMsg,
-		limit,
+		limit = options.iterationLimit,
 		limitReached = false,
-		quiet,
+		includeTarget = options.includeTarget,
+		includeTargetName = options.includeTargetName + '',
+		quiet = options.quiet,
+		grep = options.grep,
 		i,
 		el;
-	// Merge arguments into options
 
+	// To include self
+	if (includeTarget) {
+		includeTargetObj[includeTargetName] = target;
+		target = includeTargetObj;
+	}
 	// Sort all required descriptions
-	limit = options.iterationLimit;
-	cols = options.show;
-	quiet = options.quiet;
 	descriptions = getPropertyDescriptions( target, options, options.namePrefix || '', options.r, [], [], null);
 	descriptions.sort(sortDescriptions.bind(null, options.sort));
 
@@ -673,7 +680,8 @@ function ls(target) {
 	}
 	columnDescriptions = createColumnDescriptions(cols, columnWidths);
 	sprintfString = createSprintfString.call(options, columnDescriptions);
-	fnDescriptionToLine = descriptionToLines.bind(options, allLines, sprintfString);
+	fnGrep = grep ? function(line) { return line.indexOf(grep) !== -1 } : null;
+	fnDescriptionToLine = descriptionToLines.bind(options, allLines, sprintfString, fnGrep);
 
 	// Collect lines
 	// Headers force hack, omit grep :^)
@@ -731,6 +739,10 @@ function ls(target) {
 		// Or clear lines
 		allLines.length = 0;
 	}
+
+	if (options.includeTarget) {
+		delete includeTargetObj[includeTargetName];
+	}
 }
 
 ls.setOpt = function(opt) {
@@ -783,12 +795,41 @@ ls.setOpt = function(opt) {
 		 * @type {Object}
 		 */
 		value: {
+			/**
+			 * Fallback display style. "large", "medium", "small" or "none"
+			 * @type {String}
+			 */
 			default: MEDIUM,
+			/**
+			 * Display style for functions. If undefined, fallback to default
+			 * @type {String}
+			 */
 			function: undefined,
+			/**
+			 * Display style for Objects. If undefined, fallback to default
+			 * @type {String}
+			 */
 			object: undefined,
+			/**
+			 * Display style for Arrays. If undefined, fallback to default
+			 * @type {String}
+			 */
 			array: undefined,
+			/**
+			 * Indenting for display style "large". No indenting implies all on a single line.
+			 * @type {String}
+			 */
 			indent: '  ',
+			/**
+			 * Maximum width of a value, regardless of its display style. Excess gets chopped and added
+			 * chopChar at the place of chopping.
+			 * @type {Number}
+			 */
 			maxWidth: 40,
+			/**
+			 * Recursion limit for displaying objects and arrays using display style "medium".
+			 * @type {Number}
+			 */
 			mediumDepth: 2
 		},
 		/**
@@ -859,42 +900,62 @@ ls.setOpt = function(opt) {
 		 */
 		clear: false,
 
+		/**
+		 * Maximum number of properties to iterate over.
+		 * 0 to enforce no limit
+		 * @type {Number}
+		 */
 		iterationLimit: 100000,
 
+		/**
+		 * Whether or not to include the target as part of the listing
+		 * @type {Boolean}
+		 */
+		includeTarget: false,
+
+		/**
+		 * What label to use when the target gets included
+		 * @type {String}
+		 */
+		includeTargetName: '[target]',
+
 		buffer: {
+			/**
+			 * If true, the last result is stored in a buffer which can be viewed using ls.q
+			 * @type {Boolean}
+			 */
 			enabled: true,
+			/**
+			 * Maximum number of characters on a line, for buffer view only
+			 * @type {Number}
+			 */
 			maxWidth: 133,
+			/**
+			 * Maximum rows printed at once, for buffer view only
+			 * @type {Number}
+			 */
 			maxHeight: 38,
+			/**
+			 * Wrap search and navigation during buffer navigation (ls.q)
+			 * @type {Boolean}
+			 */
 			wrap: true,
+			/**
+			 * Clear console before each log, if possible
+			 * @type {Boolean}
+			 */
 			clear: true
 		}
 	};
 
 	ls.opt = args.length > 0 ? createOptions(defaultOptions, args, 0) : defaultOptions;
+	return ls;
 };
 
 // Sets defaults
 ls.setOpt();
 
 /* additional API methods */
-
-ls.cat = function(value) {
-	value = { '': value };
-	var catOptions = {
-		value: {
-			default: LARGE,
-			function: LARGE,
-			object: LARGE,
-			array: LARGE,
-			maxWidth: 0
-		},
-		r: 1,
-		show: 'value',
-		sort: [],
-		quiet: true
-	};
-	ls(value, catOptions)
-};
 
 /**
  * Create an ls function preceded by several options objects. Shorthand notations are also supported.
@@ -908,7 +969,7 @@ function lsCombo(arrOptions) {
 }
 
 function _addRecursive(target, keys, arrOptions) {
-	var lsShortcuts = ls._add,
+	var lsShortcuts = ls.addShortcut,
 		i = 0,
 		config,
 		arrOptionsName,
@@ -925,15 +986,15 @@ function _addRecursive(target, keys, arrOptions) {
 	}
 }
 
-ls._add = function(key, options) {
-	var lsShortcuts = ls._add,
+ls.addShortcut = function(key, options) {
+	var lsShortcuts = ls.addShortcut,
 		arr,
 		name,
 		i = 0;
 	if (isObject(key)) {
 		arr = Object.keys(key);
 		while (name = arr[i++]) {
-			ls._add(name, key[name])
+			ls.addShortcut(name, key[name])
 		}
 	} else if (ls[key]) {
 		printLines(sprintf(msgExists, key), ls.opt);
@@ -943,7 +1004,7 @@ ls._add = function(key, options) {
 	}
 };
 
-ls._add({
+ls.addShortcut({
 	"find": {
 		r: 0,
 		show: 'name',
@@ -962,6 +1023,20 @@ ls._add({
 		show: ['name', 'value'],
 		filter: { lsLeaf: true },
 		value: { function: LARGE, indent: '', maxWidth: 0 }
+	},
+	"cat": {
+		value: {
+			default: LARGE,
+			function: LARGE,
+			object: LARGE,
+			array: LARGE,
+			maxWidth: 0
+		},
+		r: 1,
+		show: 'value',
+		sort: [],
+		quiet: true,
+		includeTarget: true
 	}
 });
 
