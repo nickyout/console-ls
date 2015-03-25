@@ -5,15 +5,23 @@
 var doc,
 	enc = encodeURIComponent,
 	browserOpt = {},
+	Obj = Object,
 	sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	isObject = require('lodash.isobject'),
 	isArray = require('lodash.isarray'),
 	isNumber = function(val) { return !isNaN(val) && typeof val === "number" },
 	isPlainObject = function(value) { return value && typeOf(value) === "Object"; },
 	isCollection = function(val) { return isArray(val) || isPlainObject(val); },
-	typeOf = function(value) { return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
+	typeOf = function(value) { return (Obj.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
+	ObjKeys = Obj.keys.bind(Obj),
+	has = function(target, name) {
+		return target.hasOwnProperty(name);
+	},
+	inSequence = function(arr, val) {
+		return arr.indexOf(val) !== -1;
+	},
 	merge = function(target, source) {
-		var keys = Object.keys(source),
+		var keys = ObjKeys(source),
 			key,
 			i = -1;
 		while (++i < keys.length) {
@@ -32,7 +40,7 @@ var doc,
 	intersection = function(arr1, arr2) {
 		var i=-1, returnArr = [];
 		while (++i < arr1.length) {
-			if (arr2.indexOf(arr1[i]) !== -1) {
+			if (inSequence(arr2, arr1[i])) {
 				returnArr.push(arr1[i]);
 			}
 		}
@@ -40,7 +48,7 @@ var doc,
 	},
 	diff = function(example, derivative) {
 		var obj = null,
-			keys = Object.keys(example),
+			keys = ObjKeys(example),
 			i = 0,
 			val,
 			name;
@@ -147,13 +155,13 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		}
 		owner = target;
 		ownerDepth = 0;
-		while (!owner.hasOwnProperty(name)) {
-			owner = Object.getPrototypeOf(owner);
+		while (!has(owner, name)) {
+			owner = Obj.getPrototypeOf(owner);
 			ownerDepth++;
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
 		kind = options.defineKind(value, name, target);
-		isCircular = blackList.indexOf(value) !== -1;
+		isCircular = inSequence(blackList, value);
 		previousDescrLength = descr.length;
 		entry = _createEntry(
 			namePrefix + name,
@@ -237,7 +245,7 @@ function filterDescription(el){
 		filter = options.filter;
 
 	for (var name in filter) {
-		if (el.hasOwnProperty(name) && filter[name] !== undefined && (el[name]+'').search(filter[name]) === -1) {
+		if (has(el, name) && filter[name] !== undefined && (el[name]+'').search(filter[name]) === -1) {
 			return false;
 		}
 	}
@@ -322,7 +330,7 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 	// Either single line, or all indented
 	var isArr = isArray(value),
 		str = isArr ? '[' : '{',
-		iter = isArr ? value : Object.keys(value),
+		iter = isArr ? value : ObjKeys(value),
 		isNonEmpty = iter.length > 0,
 		i = -1,
 		iterValue,
@@ -465,7 +473,7 @@ function stringify(value, options, prefix, blackList, depth) {
 			// Showing contents
 			if (isCollection(value)) {
 				// First call
-				if (blackList.indexOf(value) !== -1) {
+				if (inSequence(blackList, value)) {
 					return "[Circular]";
 				}
 				blackList.push(value);
@@ -571,10 +579,10 @@ function createOptions(defaultOptions, args, index) {
 		if (arg.value && !isPlainObject(arg.value)) {
 			arg.value = { default: arg.value };
 		}
-		if (arg.hasOwnProperty('filter') && !isPlainObject(arg.filter)) {
+		if (has(arg, 'filter') && !isPlainObject(arg.filter)) {
 			arg.filter = { name: arg.filter };
 		}
-		if (arg.hasOwnProperty('buffer') && !isPlainObject(arg.buffer)) {
+		if (has(arg, 'buffer') && !isPlainObject(arg.buffer)) {
 			arg.buffer = { enabled: arg.buffer };
 		}
 		merge(options, arg);
@@ -720,7 +728,7 @@ function ls(target) {
 	}
 	columnDescriptions = createColumnDescriptions(cols, columnWidths);
 	sprintfString = createSprintfString.call(options, columnDescriptions);
-	fnGrep = grep ? function(line) { return line.indexOf(grep) !== -1 } : null;
+	fnGrep = grep ? function(line) { return line.search(grep) !== -1 } : null;
 	fnDescriptionToLine = descriptionToLines.bind(options, allLines, sprintfString, fnGrep);
 
 	// Collect lines
@@ -1015,7 +1023,7 @@ function _addRecursive(target, keys, arrOptions) {
 		name;
 	while (name = keys[i++]) {
 		config = lsShortcuts[name];
-		if (arrOptions.indexOf(config) === -1) {
+		if (inSequence(arrOptions, config)) {
 			arrOptionsName = arrOptions.concat(config);
 			if (!target[name]) {
 				target[name] = lsCombo(arrOptionsName);
@@ -1031,7 +1039,7 @@ ls.addShortcut = function(key, options) {
 		name,
 		i = 0;
 	if (isObject(key)) {
-		arr = Object.keys(key);
+		arr = ObjKeys(key);
 		while (name = arr[i++]) {
 			ls.addShortcut(name, key[name])
 		}
@@ -1039,7 +1047,7 @@ ls.addShortcut = function(key, options) {
 		printLines(sprintf(msgExists, key), ls.opt);
 	} else {
 		lsShortcuts[key] = options;
-		_addRecursive(ls, Object.keys(lsShortcuts), []);
+		_addRecursive(ls, ObjKeys(lsShortcuts), []);
 	}
 };
 
@@ -1103,7 +1111,7 @@ function _searchLines(lines, searchArg, index, increment, doWrap) {
 			break;
 		}
 
-		if (lines[i].indexOf(searchArg) !== -1) {
+		if (inSequence(lines[i], searchArg)) {
 			return i;
 		}
 		i += increment;
@@ -1207,11 +1215,11 @@ ls.q = bufferNavigate;
  * @param {String} hostURL - the url to this script
  */
 function toURL(hostURL) {
+	hostURL || (hostURL = '');
 	var currentOpt = ls.opt,
 		defaultOpt = ls.setOpt().opt,
 		optDiff = diff(defaultOpt, currentOpt),
-		argStr,
-		url = hostURL || "https://rawgit.com/nickyout/console-ls/master/dist/ls.min.js";
+		argStr;
 
 	ls.opt = currentOpt;
 
@@ -1227,7 +1235,7 @@ function toURL(hostURL) {
 	} else {
 		argStr = "";
 	}
-	return url + argStr;
+	return hostURL + argStr;
 }
 
 ls.toURL = function(hostURL) {

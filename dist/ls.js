@@ -1,17 +1,29 @@
 (function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.ls = f()}})(function(){var define,module,exports;return (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+(function (global){
 "use strict";
 
-/* common utils */
+/////////////////////////////////////// common utils ///////////////////////////////////////
 
-var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
+var doc,
+	enc = encodeURIComponent,
+	browserOpt = {},
+	Obj = Object,
+	sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	isObject = require('lodash.isobject'),
 	isArray = require('lodash.isarray'),
 	isNumber = function(val) { return !isNaN(val) && typeof val === "number" },
 	isPlainObject = function(value) { return value && typeOf(value) === "Object"; },
 	isCollection = function(val) { return isArray(val) || isPlainObject(val); },
-	typeOf = function(value) { return (Object.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
+	typeOf = function(value) { return (Obj.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
+	ObjKeys = Obj.keys.bind(Obj),
+	has = function(target, name) {
+		return target.hasOwnProperty(name);
+	},
+	inSequence = function(arr, val) {
+		return arr.indexOf(val) !== -1;
+	},
 	merge = function(target, source) {
-		var keys = Object.keys(source),
+		var keys = ObjKeys(source),
 			key,
 			i = -1;
 		while (++i < keys.length) {
@@ -30,38 +42,91 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	intersection = function(arr1, arr2) {
 		var i=-1, returnArr = [];
 		while (++i < arr1.length) {
-			if (arr2.indexOf(arr1[i]) !== -1) {
+			if (inSequence(arr2, arr1[i])) {
 				returnArr.push(arr1[i]);
 			}
 		}
 		return returnArr;
+	},
+	diff = function(example, derivative) {
+		var obj = null,
+			keys = ObjKeys(example),
+			i = 0,
+			val,
+			name;
+		while (name = keys[i++]) {
+			if (isPlainObject(example[name]) && (val = diff(example[name], derivative[name]))) {
+				obj[name] = val;
+			} else {
+				val = derivative[name];
+				if (val + '' != example[name] + '') {
+					obj || (obj = {});
+					obj[name] = val;
+				}
+			}
+		}
+		return obj;
 	};
 
-/* ls args */
+/////////////////////////////////////// core ls vars ///////////////////////////////////////
 
 var regFnArgs = /(\([^)]*\))/,
 	regNewline = /\s*\n\s*/gm,
-	privateTestEntry = {},
 	msgNoBuffer = 'No buffer present to browse',
 	msgNav = '[From %s to %s of %s] ',
 	msgFound = "Found %s at %s",
 	msgNotFound = "Did not find %s",
 	msgMoved = "Moved to %s",
+	msgOverflow = " * Iteration limit %s reached. The rest was omitted.",
 	msgExists = "Property %s already exists",
 	allColumns = ['name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
+	includeTargetObj = {},
+	recycledEntries = [],
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
 	NONE = 'none';
 
-/* ls utils */
+/////////////////////////////////////// core ls utils ///////////////////////////////////////
 
+function _createEntry(name, value, type, kind, isPrivate, isCircular, owner, ownerDepth, ownerCtorName) {
+	var val = recycledEntries.length > 0 ? recycledEntries.pop() : {};
+	val.name = name;
+	val._value = value;
+	val.value = '';
+	val.type = type;
+	val.kind = kind;
+	val.isPrivate = isPrivate;
+	val.isCircular = isCircular;
+	val.lsLeaf = false;
+	val.owner = owner;
+	val.ownerDepth = ownerDepth;
+	val.className = ownerCtorName;
+	return val;
+}
+
+function _recycleEntry(el) {
+	if (recycledEntries.length < 1000) {
+		el.value = el._value = el.owner = null;
+		// the rest should be ok
+		recycledEntries.push(el);
+	}
+}
+
+/**
+ *
+ * @param {*} target
+ * @param {Object} options
+ * @param {String} namePrefix
+ * @param {Number} depth
+ * @param {Array} descr
+ * @param {Array} blackList
+ * @param {?*} parent
+ * @returns {*}
+ */
 function getPropertyDescriptions(target, options, namePrefix, depth, descr, blackList, parent) {
-	namePrefix || (namePrefix = '');
-	descr || (descr = []);
-	blackList || (blackList = []);
 	var entry,
 		owner,
 		ownerDepth,
@@ -71,45 +136,46 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		isCircular,
 		isPrivate,
 		previousBlackListLength = blackList.length,
-		previousDescrLength;
+		previousDescrLength,
+		limit = options.iterationLimit;
 
 	if (!isObject(target)) {
 		return descr;
 	}
 	blackList.push(target);
 	for (var name in target) {
+		if (limit && limit <= options._it) {
+			break;
+		} else {
+			options._it++;
+		}
+
 		value = target[name];
 		isPrivate = options.definePrivate(value, name, target);
-		if (options.filter.isPrivate !== undefined) {
-			// Probably worth the extra check
-			privateTestEntry.isPrivate = isPrivate;
-			if (!filterDescription.call(options, privateTestEntry)) {
-				continue;
-			}
+		if (!filterByValue.call(options, "isPrivate", isPrivate)) {
+			continue;
 		}
 		owner = target;
 		ownerDepth = 0;
-		while (!owner.hasOwnProperty(name)) {
-			owner = Object.getPrototypeOf(owner);
+		while (!has(owner, name)) {
+			owner = Obj.getPrototypeOf(owner);
 			ownerDepth++;
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
 		kind = options.defineKind(value, name, target);
-		isCircular = blackList.indexOf(value) !== -1;
+		isCircular = inSequence(blackList, value);
 		previousDescrLength = descr.length;
-		entry = {
-			kind: kind,
-			type: typeOf(value),
-			isPrivate: (parent && parent.isPrivate) || isPrivate,
-			isCircular: isCircular,
-			lsLeaf: false,
-			name: namePrefix + name,
-			_value: value,
-			value: isCircular ? "[Circular]" : stringify(value, options) + '',
-			owner: owner,
-			ownerDepth: ownerDepth,
-			className: ownerCtorName
-		};
+		entry = _createEntry(
+			namePrefix + name,
+			value,
+			typeOf(value),
+			kind,
+			(parent && parent.isPrivate) || isPrivate,
+			isCircular,
+			owner,
+			ownerDepth,
+			ownerCtorName
+		);
 		if (depth !== 1 && !isCircular) {
 			getPropertyDescriptions(
 				value,
@@ -122,9 +188,21 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			);
 		}
 		entry.lsLeaf = !isCollection(value) || descr.length == previousDescrLength;
+
+		// Prevent unnecessary value making
+		if (!filterByValue.call(options, "lsLeaf", entry.lsLeaf)) {
+			_recycleEntry(entry);
+			continue;
+		}
+
+		// Okay, make the string
+		entry.value = isCircular ? "[Circular]" : stringify(value, options) + '';
+
 		// Option to leave out recursed entirely
 		if (filterDescription.call(options, entry)) {
 			descr.push(entry);
+		} else {
+			_recycleEntry(entry);
 		}
 	}
 	// Truncate elements added in the list during this loop
@@ -156,12 +234,20 @@ function sortDescriptions(arrSort, a,b) {
 	return returnVal;
 }
 
+function filterByValue(type, value) {
+	var options = this,
+		filter = options.filter;
+
+	return !(filter[type] !== undefined && (value+'').search(filter[type]) === -1)
+}
+
+
 function filterDescription(el){
 	var options = this,
 		filter = options.filter;
 
 	for (var name in filter) {
-		if (el.hasOwnProperty(name) && filter[name] !== undefined && (el[name]+'').search(filter[name]) === -1) {
+		if (has(el, name) && filter[name] !== undefined && (el[name]+'').search(filter[name]) === -1) {
 			return false;
 		}
 	}
@@ -209,16 +295,17 @@ function printLines(lines, options) {
 
 /**
  * Converts a propertyDescription into a string or array of strings and adds them to argument `lines`.
- * @param {Array} lines
+ * @param {Array} allLines
  * @param {String} sprintfString
+ * @param {?Function} fnGrep
  * @param {Object} propertyDescription
  * @this {Object} options
  */
-function descriptionToLines(lines, sprintfString, propertyDescription) {
+function descriptionToLines(allLines, sprintfString, fnGrep, propertyDescription) {
 	var options = this,
 		args = [sprintfString],
 		force = options.force,
-		line,
+		lines,
 		i = 0,
 		key;
 
@@ -226,11 +313,11 @@ function descriptionToLines(lines, sprintfString, propertyDescription) {
 	while (key = allColumns[i++]) {
 		args.push(propertyDescription[key]);
 	}
-	line = sprintf.apply(null, args);
-	if (!force && options.grep && line.search(options.grep) === -1) {
-		return;
+	lines = sprintf.apply(null, args).split('\n');
+	if (!force && fnGrep) {
+		lines = lines.filter(fnGrep);
 	}
-	lines.push.apply(lines, line.split('\n'));
+	allLines.push.apply(allLines, lines);
 }
 
 /**
@@ -245,7 +332,7 @@ function _stringifyCollection(value, options, prefix, blackList, depth) {
 	// Either single line, or all indented
 	var isArr = isArray(value),
 		str = isArr ? '[' : '{',
-		iter = isArr ? value : Object.keys(value),
+		iter = isArr ? value : ObjKeys(value),
 		isNonEmpty = iter.length > 0,
 		i = -1,
 		iterValue,
@@ -388,7 +475,7 @@ function stringify(value, options, prefix, blackList, depth) {
 			// Showing contents
 			if (isCollection(value)) {
 				// First call
-				if (blackList.indexOf(value) !== -1) {
+				if (inSequence(blackList, value)) {
 					return "[Circular]";
 				}
 				blackList.push(value);
@@ -494,8 +581,11 @@ function createOptions(defaultOptions, args, index) {
 		if (arg.value && !isPlainObject(arg.value)) {
 			arg.value = { default: arg.value };
 		}
-		if (arg.hasOwnProperty('filter') && !isPlainObject(arg.filter)) {
+		if (has(arg, 'filter') && !isPlainObject(arg.filter)) {
 			arg.filter = { name: arg.filter };
+		}
+		if (has(arg, 'buffer') && !isPlainObject(arg.buffer)) {
+			arg.buffer = { enabled: arg.buffer };
 		}
 		merge(options, arg);
 	}
@@ -519,28 +609,30 @@ function createOptions(defaultOptions, args, index) {
 		options.r = 0;
 	}
 
-	// Normalize value settings
-	value = options.value;
-	value.default || (value.default = MEDIUM);
-	value.function || (value.function = value.default);
-	value.object || (value.object = value.default);
-	value.array || (value.array = value.default);
+	// Iteration counter. No judge.
+	options._it = 0;
 	return options;
 }
+
+/////////////////////////////////////// main function ///////////////////////////////////////
 
 /**
  * Description given for each property found.
  * @typedef {Object} module:console-ls~PropertyDefinition
  * @prop {String} name - the property name on the instance
- * @prop {*} value - the property value
- * @prop {String} type - the type of the property value.
- * @prop {String} kind - the interpreted kind of value. Can be "class", "method" or "property"
- * @prop {Boolean} isPrivate - whether or not the property is considered private/protected.
+ * @prop {String} value - the string representation of the property value
+ * @prop {*} _value - the actual value
+ * @prop {String} type - the type of the property value (Object.prototype.toString).
+ * @prop {String} kind - the interpreted kind of value, as defined by <code>options.defineKind</code>.
+ * Can be "class", "method" or "property".
+ * @prop {Boolean} isPrivate - whether or not the property is considered private/protected,
+ * as defined by <code>options.defineKind</code>.
  * @prop {Boolean} isCircular - whether or not its value is also equal one of its parents.
- * Derived from whether or not the property name starts with a _
  * @prop {*} owner - the actual owner of the property. Can be the target itself, or any instance it its prototype chain.
  * @prop {Number} ownerDepth - the depth in the prototype chain at which the owner was found
  * @prop {String} className - the constructor name of the owner, or "(anonymous)" if not found.
+ * @prop {Boolean} lsLeaf - Objects and Arrays which are iterated over get <code>lsLeaf == false </code>. All others
+ * get <code>true</code>. This is used to filter on to prevent redundant display of objects/arrays as values.
  */
 
 /**
@@ -575,66 +667,58 @@ function createOptions(defaultOptions, args, index) {
  */
 
 /**
- * List the contents of any object, array, regexp, function, or derivative. Prints output to <code>console.log</code>.
+ * List the contents of any object, array, regexp, function, or derivative.
+ * Prints output to <code>options.fnLog</code>.
  * @param {Object|Array|RegExp|Function} target - the target to list the contents of
  * @param {...module:console-ls~Options|String|RegExp|Number} [options] - several option specifications are merged into one.
  * If string or regexp, the value is used as used as options.grep.
  * If number, the value is used as options.r.
- * @example
- *
- * ls(u, "property");
- * // kind:      name:                value:
- * // ---------- -------------------- --------------------
- * // property   VERSION              "2.4.1"
- * // property   support              { funcDecomp: true, funcNames: true }
- * // property   templateSettings     { escape: /<%-([\s\S]+?)%>/g, evaluate: /<%([\...}
- * // method     property             function()
- *
- * ls(u, { grep: "property", sort: "kind" });
- * // kind:      name:                value:
- * // ---------- -------------------- --------------------
- * // method     property             function()
- * // property   VERSION              "2.4.1"
- * // property   templateSettings     { escape: /<%-([\s\S]+?)%>/g, evaluate: /<%([\...}
- * // property   support              { funcDecomp: true, funcNames: true }
- *
- * ls(u, { filter: { kind: "property" }, sort: ["kind", "name"] });
- * // kind:      name:                value: * // ---------- -------------------- --------------------
- * // property   VERSION              "2.4.1"
- * // property   support              { funcDecomp: true, funcNames: true }
- * // property   templateSettings     { escape: /<%-([\s\S]+?)%>/g, evaluate: /<%([\...}
- *
- * ls(u, { filter: { isPrivate: "true" }, showPrivate: true, all: true });
- * // kind:      name:                value:               type:      isPrivate: className:
- * // ---------- -------------------- -------------------- ---------- ---------- --------------------
- * // method     _                    function()           Function   true       Function
  * @module {Function} console-ls
  */
 function ls(target) {
 	var descriptions,
-		descriptionsLength,
 		chopAt,
 		fnDescriptionToLine,
+		fnGrep,
 		options = createOptions(ls.opt, arguments),
 		columnDescriptions,
 		columnWidths = {},
-		cols,
+		cols = options.show,
 		maxHeight = options.maxHeight,
 		bufferEnabled = options.buffer.enabled,
 		allLines = [],
 		sprintfString,
 		lines,
 		chopMsg,
+		limit = options.iterationLimit,
+		limitReached = false,
+		includeTarget = options.includeTarget,
+		includeTargetName = options.includeTargetName + '',
+		quiet = options.quiet,
+		grep = options.grep,
+		optValue = options.value,
 		i,
 		el;
-	// Merge arguments into options
 
+
+	// Normalize value settings
+	optValue.default || (optValue.default = MEDIUM);
+	optValue.function || (optValue.function = optValue.default);
+	optValue.object || (optValue.object = optValue.default);
+	optValue.array || (optValue.array = optValue.default);
+
+	// To include self
+	if (includeTarget) {
+		includeTargetObj[includeTargetName] = target;
+		target = includeTargetObj;
+	}
 	// Sort all required descriptions
-	cols = options.show;
-	descriptions = getPropertyDescriptions(target, options, options.namePrefix, options.r, []);
+	descriptions = getPropertyDescriptions( target, options, options.namePrefix || '', options.r, [], [], null);
 	descriptions.sort(sortDescriptions.bind(null, options.sort));
-	descriptionsLength = descriptions.length;
 
+	if (limit && limit <= options._it) {
+		limitReached = true;
+	}
 	// Create properly sized print method
 	i = 0;
 	while (el = cols[i++]) {
@@ -646,11 +730,12 @@ function ls(target) {
 	}
 	columnDescriptions = createColumnDescriptions(cols, columnWidths);
 	sprintfString = createSprintfString.call(options, columnDescriptions);
-	fnDescriptionToLine = descriptionToLines.bind(options, allLines, sprintfString);
+	fnGrep = grep ? function(line) { return line.search(grep) !== -1 } : null;
+	fnDescriptionToLine = descriptionToLines.bind(options, allLines, sprintfString, fnGrep);
 
 	// Collect lines
 	// Headers force hack, omit grep :^)
-	if (!options.quiet) {
+	if (!quiet) {
 		options.force = true;
 		fnDescriptionToLine(columnDescriptions.label);
 		fnDescriptionToLine(columnDescriptions.sep);
@@ -667,24 +752,28 @@ function ls(target) {
 		}
 	}
 
+	// Clear immediately
+	descriptions.length = 0;
+
+	if (!quiet && limitReached) {
+		allLines.push(sprintf(msgOverflow, limit));
+	}
+
 	// w/ bufferEnabled, check for chop
 	if (bufferEnabled && maxHeight && maxHeight < allLines.length) {
 		chopAt = maxHeight;
 	}
 
 	// If subset, add end message
-	if (!options.quiet && chopAt) {
+	if (!quiet && chopAt) {
 		// Last row is status message
-		chopMsg = sprintf(msgNav, 0, chopAt - 2, descriptions.length);
+		chopMsg = sprintf(msgNav, 0, chopAt - 2, allLines.length);
 	}
-
-	// Clear immediately
-	descriptions.length = 0;
 
 	// Print lines
 	if (chopAt) {
 		lines = bufferEnabled ? allLines.slice(0, chopAt) : allLines;
-		if (!options.quiet) {
+		if (!quiet) {
 			lines[chopAt - 1] = chopMsg;
 		}
 	} else {
@@ -700,7 +789,13 @@ function ls(target) {
 		// Or clear lines
 		allLines.length = 0;
 	}
+
+	if (options.includeTarget) {
+		delete includeTargetObj[includeTargetName];
+	}
 }
+
+/////////////////////////////////////// all settings ///////////////////////////////////////
 
 ls.setOpt = function(opt) {
 	var c = console, args = arguments, defaultOptions = {
@@ -736,7 +831,7 @@ ls.setOpt = function(opt) {
 		 * Set maximum number of output rows.
 		 * @type {Number}
 		 */
-		maxHeight: 0,
+		maxHeight: 1000,
 		/**
 		 * If true, only the result is printed (no headers etc).
 		 * @type {Boolean}
@@ -752,12 +847,41 @@ ls.setOpt = function(opt) {
 		 * @type {Object}
 		 */
 		value: {
+			/**
+			 * Fallback display style. "large", "medium", "small" or "none"
+			 * @type {String}
+			 */
 			default: MEDIUM,
+			/**
+			 * Display style for functions. If undefined, fallback to default
+			 * @type {String}
+			 */
 			function: undefined,
+			/**
+			 * Display style for Objects. If undefined, fallback to default
+			 * @type {String}
+			 */
 			object: undefined,
+			/**
+			 * Display style for Arrays. If undefined, fallback to default
+			 * @type {String}
+			 */
 			array: undefined,
+			/**
+			 * Indenting for display style "large". No indenting implies all on a single line.
+			 * @type {String}
+			 */
 			indent: '  ',
+			/**
+			 * Maximum width of a value, regardless of its display style. Excess gets chopped and added
+			 * chopChar at the place of chopping.
+			 * @type {Number}
+			 */
 			maxWidth: 40,
+			/**
+			 * Recursion limit for displaying objects and arrays using display style "medium".
+			 * @type {Number}
+			 */
 			mediumDepth: 2
 		},
 		/**
@@ -828,40 +952,59 @@ ls.setOpt = function(opt) {
 		 */
 		clear: false,
 
+		/**
+		 * Maximum number of properties to iterate over.
+		 * 0 to enforce no limit
+		 * @type {Number}
+		 */
+		iterationLimit: 100000,
+
+		/**
+		 * Whether or not to include the target as part of the listing
+		 * @type {Boolean}
+		 */
+		includeTarget: false,
+
+		/**
+		 * What label to use when the target gets included
+		 * @type {String}
+		 */
+		includeTargetName: '[target]',
+
 		buffer: {
+			/**
+			 * If true, the last result is stored in a buffer which can be viewed using ls.q
+			 * @type {Boolean}
+			 */
 			enabled: true,
+			/**
+			 * Maximum number of characters on a line, for buffer view only
+			 * @type {Number}
+			 */
 			maxWidth: 133,
+			/**
+			 * Maximum rows printed at once, for buffer view only
+			 * @type {Number}
+			 */
 			maxHeight: 38,
+			/**
+			 * Wrap search and navigation during buffer navigation (ls.q)
+			 * @type {Boolean}
+			 */
 			wrap: true,
+			/**
+			 * Clear console before each log, if possible
+			 * @type {Boolean}
+			 */
 			clear: true
 		}
 	};
-
+	defaultOptions = merge(defaultOptions, browserOpt);
 	ls.opt = args.length > 0 ? createOptions(defaultOptions, args, 0) : defaultOptions;
+	return ls;
 };
 
-// Sets defaults
-ls.setOpt();
-
-/* additional API methods */
-
-ls.cat = function(value) {
-	value = { '': value };
-	var catOptions = {
-		value: {
-			default: LARGE,
-			function: LARGE,
-			object: LARGE,
-			array: LARGE,
-			maxWidth: 0
-		},
-		r: 1,
-		show: 'value',
-		sort: [],
-		quiet: true
-	};
-	ls(value, catOptions)
-};
+/////////////////////////////////////// shortcuts ///////////////////////////////////////
 
 /**
  * Create an ls function preceded by several options objects. Shorthand notations are also supported.
@@ -875,14 +1018,14 @@ function lsCombo(arrOptions) {
 }
 
 function _addRecursive(target, keys, arrOptions) {
-	var lsShortcuts = ls._add,
+	var lsShortcuts = ls.addShortcut,
 		i = 0,
 		config,
 		arrOptionsName,
 		name;
 	while (name = keys[i++]) {
 		config = lsShortcuts[name];
-		if (arrOptions.indexOf(config) === -1) {
+		if (inSequence(arrOptions, config)) {
 			arrOptionsName = arrOptions.concat(config);
 			if (!target[name]) {
 				target[name] = lsCombo(arrOptionsName);
@@ -892,25 +1035,25 @@ function _addRecursive(target, keys, arrOptions) {
 	}
 }
 
-ls._add = function(key, options) {
-	var lsShortcuts = ls._add,
+ls.addShortcut = function(key, options) {
+	var lsShortcuts = ls.addShortcut,
 		arr,
 		name,
 		i = 0;
 	if (isObject(key)) {
-		arr = Object.keys(key);
+		arr = ObjKeys(key);
 		while (name = arr[i++]) {
-			ls._add(name, key[name])
+			ls.addShortcut(name, key[name])
 		}
 	} else if (ls[key]) {
 		printLines(sprintf(msgExists, key), ls.opt);
 	} else {
 		lsShortcuts[key] = options;
-		_addRecursive(ls, Object.keys(lsShortcuts), []);
+		_addRecursive(ls, ObjKeys(lsShortcuts), []);
 	}
 };
 
-ls._add({
+ls.addShortcut({
 	"find": {
 		r: 0,
 		show: 'name',
@@ -929,10 +1072,24 @@ ls._add({
 		show: ['name', 'value'],
 		filter: { lsLeaf: true },
 		value: { function: LARGE, indent: '', maxWidth: 0 }
+	},
+	"cat": {
+		value: {
+			default: LARGE,
+			function: LARGE,
+			object: LARGE,
+			array: LARGE,
+			maxWidth: 0
+		},
+		r: 1,
+		show: 'value',
+		sort: [],
+		quiet: true,
+		includeTarget: true
 	}
 });
 
-/* cache navigation */
+/////////////////////////////////////// buffer navigation ///////////////////////////////////////
 
 function _searchLines(lines, searchArg, index, increment, doWrap) {
 	var max = lines.length,
@@ -956,7 +1113,7 @@ function _searchLines(lines, searchArg, index, increment, doWrap) {
 			break;
 		}
 
-		if (lines[i].indexOf(searchArg) !== -1) {
+		if (inSequence(lines[i], searchArg)) {
 			return i;
 		}
 		i += increment;
@@ -1053,10 +1210,74 @@ function bufferNavigate(action, fromRow) {
 
 ls.q = bufferNavigate;
 
-/* ...and export! */
+/////////////////////////////////////// handy loads ///////////////////////////////////////
+
+/**
+ * Logs an url that, if loaded, will load in the options set in opt
+ * @param {String} hostURL - the url to this script
+ */
+function toURL(hostURL) {
+	hostURL || (hostURL = '');
+	var currentOpt = ls.opt,
+		defaultOpt = ls.setOpt().opt,
+		optDiff = diff(defaultOpt, currentOpt),
+		argStr;
+
+	ls.opt = currentOpt;
+
+	if (optDiff) {
+		argStr = "?" + enc(stringify(optDiff, {
+			value: {
+				default: "large",
+				object: "large",
+				array: "large",
+				function: "large"
+			}
+		}));
+	} else {
+		argStr = "";
+	}
+	return hostURL + argStr;
+}
+
+ls.toURL = function(hostURL) {
+	ls.opt.fnLog(toURL(hostURL));
+};
+
+/**
+ * Function that gets stringified. [url] gets swapped with the actual url.
+ * Only use onload, ls is not IE8-compliant anyway, and:
+ * https://pie.gd/test/script-link-events/
+ */
+var fnBookmarklet = function(){var d=document,s=d.createElement("script");s.onload=function(){ls.opt.fnLog("Loaded console-ls")};s.src="[url]";d.body.appendChild(s)};
+
+/**
+ * Double encode seems to work
+ * @param {String} hostURL - the url to the script
+ * @returns {String}
+ */
+ls.toBookmarklet = function(hostURL) {
+	ls.opt.fnLog('javascript:(' + enc( fnBookmarklet.toString().replace('[url]', toURL(hostURL)) ) + ')()');
+};
+
+// In case of browser start, check for args in own script src
+if (doc = global.document) {
+	var script = doc.getElementsByTagName("script"),
+		url = script.length > 0 && script[script.length - 1].src,
+		opt = url && url.split('?')[1];
+	if (opt) {
+		browserOpt = eval("(" + decodeURIComponent(opt) + ")");
+	}
+}
+ 
+// Set default opt (including optional browserOpt)
+ls.setOpt();
+
+/////////////////////////////////////// export ///////////////////////////////////////
 
 module.exports = ls;
 
+}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{"lodash.isarray":2,"lodash.isobject":3,"tiny-sprintf/dist/sprintf.bare.min":4}],2:[function(require,module,exports){
 /**
  * lodash 3.0.0 (Custom Build) <https://lodash.com/>
