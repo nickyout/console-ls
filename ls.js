@@ -1,8 +1,11 @@
 "use strict";
 
-/* common utils */
+/////////////////////////////////////// common utils ///////////////////////////////////////
 
-var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
+var doc,
+	enc = encodeURIComponent,
+	browserOpt = {},
+	sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	isObject = require('lodash.isobject'),
 	isArray = require('lodash.isarray'),
 	isNumber = function(val) { return !isNaN(val) && typeof val === "number" },
@@ -34,9 +37,28 @@ var sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 			}
 		}
 		return returnArr;
+	},
+	diff = function(example, derivative) {
+		var obj = null,
+			keys = Object.keys(example),
+			i = 0,
+			val,
+			name;
+		while (name = keys[i++]) {
+			if (isPlainObject(example[name]) && (val = diff(example[name], derivative[name]))) {
+				obj[name] = val;
+			} else {
+				val = derivative[name];
+				if (val + '' != example[name] + '') {
+					obj || (obj = {});
+					obj[name] = val;
+				}
+			}
+		}
+		return obj;
 	};
 
-/* ls args */
+/////////////////////////////////////// core ls vars ///////////////////////////////////////
 
 var regFnArgs = /(\([^)]*\))/,
 	regNewline = /\s*\n\s*/gm,
@@ -57,7 +79,7 @@ var regFnArgs = /(\([^)]*\))/,
 	SMALL = 'small',
 	NONE = 'none';
 
-/* ls utils */
+/////////////////////////////////////// core ls utils ///////////////////////////////////////
 
 function _createEntry(name, value, type, kind, isPrivate, isCircular, owner, ownerDepth, ownerCtorName) {
 	var val = recycledEntries.length > 0 ? recycledEntries.pop() : {};
@@ -577,17 +599,12 @@ function createOptions(defaultOptions, args, index) {
 		options.r = 0;
 	}
 
-	// Normalize value settings
-	value = options.value;
-	value.default || (value.default = MEDIUM);
-	value.function || (value.function = value.default);
-	value.object || (value.object = value.default);
-	value.array || (value.array = value.default);
-
 	// Iteration counter. No judge.
 	options._it = 0;
 	return options;
 }
+
+/////////////////////////////////////// main function ///////////////////////////////////////
 
 /**
  * Description given for each property found.
@@ -669,8 +686,16 @@ function ls(target) {
 		includeTargetName = options.includeTargetName + '',
 		quiet = options.quiet,
 		grep = options.grep,
+		optValue = options.value,
 		i,
 		el;
+
+
+	// Normalize value settings
+	optValue.default || (optValue.default = MEDIUM);
+	optValue.function || (optValue.function = optValue.default);
+	optValue.object || (optValue.object = optValue.default);
+	optValue.array || (optValue.array = optValue.default);
 
 	// To include self
 	if (includeTarget) {
@@ -759,6 +784,8 @@ function ls(target) {
 		delete includeTargetObj[includeTargetName];
 	}
 }
+
+/////////////////////////////////////// all settings ///////////////////////////////////////
 
 ls.setOpt = function(opt) {
 	var c = console, args = arguments, defaultOptions = {
@@ -962,15 +989,12 @@ ls.setOpt = function(opt) {
 			clear: true
 		}
 	};
-
+	defaultOptions = merge(defaultOptions, browserOpt);
 	ls.opt = args.length > 0 ? createOptions(defaultOptions, args, 0) : defaultOptions;
 	return ls;
 };
 
-// Sets defaults
-ls.setOpt();
-
-/* additional API methods */
+/////////////////////////////////////// shortcuts ///////////////////////////////////////
 
 /**
  * Create an ls function preceded by several options objects. Shorthand notations are also supported.
@@ -1055,7 +1079,7 @@ ls.addShortcut({
 	}
 });
 
-/* cache navigation */
+/////////////////////////////////////// buffer navigation ///////////////////////////////////////
 
 function _searchLines(lines, searchArg, index, increment, doWrap) {
 	var max = lines.length,
@@ -1176,6 +1200,69 @@ function bufferNavigate(action, fromRow) {
 
 ls.q = bufferNavigate;
 
-/* ...and export! */
+/////////////////////////////////////// handy loads ///////////////////////////////////////
+
+/**
+ * Logs an url that, if loaded, will load in the options set in opt
+ * @param {String} hostURL - the url to this script
+ */
+function toURL(hostURL) {
+	var currentOpt = ls.opt,
+		defaultOpt = ls.setOpt().opt,
+		optDiff = diff(defaultOpt, currentOpt),
+		argStr,
+		url = hostURL || "https://rawgit.com/nickyout/console-ls/master/dist/ls.min.js";
+
+	ls.opt = currentOpt;
+
+	if (optDiff) {
+		argStr = "?" + enc(stringify(optDiff, {
+			value: {
+				default: "large",
+				object: "large",
+				array: "large",
+				function: "large"
+			}
+		}));
+	} else {
+		argStr = "";
+	}
+	return url + argStr;
+}
+
+ls.toURL = function(hostURL) {
+	ls.opt.fnLog(toURL(hostURL));
+};
+
+/**
+ * Function that gets stringified. [url] gets swapped with the actual url.
+ * Only use onload, ls is not IE8-compliant anyway, and:
+ * https://pie.gd/test/script-link-events/
+ */
+var fnBookmarklet = function(){var d=document,s=d.createElement("script");s.onload=function(){ls.opt.fnLog("Loaded console-ls")};s.src="[url]";d.body.appendChild(s)};
+
+/**
+ * Double encode seems to work
+ * @param {String} hostURL - the url to the script
+ * @returns {String}
+ */
+ls.toBookmarklet = function(hostURL) {
+	ls.opt.fnLog('javascript:(' + enc( fnBookmarklet.toString().replace('[url]', toURL(hostURL)) ) + ')()');
+};
+
+// In case of browser start, check for args in own script src
+if (doc = global.document) {
+	var script = doc.getElementsByTagName("script"),
+		url = script.length > 0 && script[script.length - 1].src,
+		opt = url && url.split('?')[1];
+	if (opt) {
+		browserOpt = eval("(" + decodeURIComponent(opt) + ")");
+	}
+}
+ 
+// Set default opt (including optional browserOpt)
+ls.setOpt();
+
+/////////////////////////////////////// export ///////////////////////////////////////
 
 module.exports = ls;
