@@ -2,7 +2,7 @@
 
 /////////////////////////////////////// common utils ///////////////////////////////////////
 
-var doc,
+var doc = global.document,
 	enc = encodeURIComponent,
 	browserOpt = {},
 	Obj = Object,
@@ -77,7 +77,7 @@ var regFnArgs = /(\([^)]*\))/,
 	msgMoved = "Moved to %s",
 	msgOverflow = " * Iteration limit %s reached. The rest was omitted.",
 	msgExists = "Property %s already exists",
-	allColumns = ['name','value','type','kind','isPrivate','className','isCircular', 'lsLeaf'],
+	allColumns = ['name','value','type','kind','depth','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
 	includeTargetObj = {},
@@ -89,13 +89,14 @@ var regFnArgs = /(\([^)]*\))/,
 
 /////////////////////////////////////// core ls utils ///////////////////////////////////////
 
-function _createEntry(name, value, type, kind, isPrivate, isCircular, owner, ownerDepth, ownerCtorName) {
+function _createEntry(name, value, type, kind, depth, isPrivate, isCircular, owner, ownerDepth, ownerCtorName) {
 	var val = recycledEntries.length > 0 ? recycledEntries.pop() : {};
 	val.name = name;
 	val._value = value;
 	val.value = '';
 	val.type = type;
 	val.kind = kind;
+	val.depth = depth;
 	val.isPrivate = isPrivate;
 	val.isCircular = isCircular;
 	val.lsLeaf = false;
@@ -124,7 +125,7 @@ function _recycleEntry(el) {
  * @param {?*} parent
  * @returns {*}
  */
-function getPropertyDescriptions(target, options, namePrefix, depth, descr, blackList, parent) {
+function getPropertyDescriptions(target, options, namePrefix, depth, currentDepth, descr, blackList, parent) {
 	var entry,
 		owner,
 		ownerDepth,
@@ -168,6 +169,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 			value,
 			typeOf(value),
 			kind,
+			currentDepth,
 			(parent && parent.isPrivate) || isPrivate,
 			isCircular,
 			owner,
@@ -180,6 +182,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 				options,
 				namePrefix + name + options.nameSep,
 				depth - 1,
+				currentDepth + 1,
 				descr,
 				blackList,
 				entry
@@ -282,7 +285,8 @@ function printLines(lines, options) {
 		chopChar = options.chopChar,
 		printStr = '';
 	while (++i < max) {
-		printStr += (printStr && '\n') + _chop(lines[i], maxWidth, chopChar);
+		// Start with \n in browsers (for chrome)
+		printStr += ((doc || printStr) && '\n') + _chop(lines[i], maxWidth, chopChar);
 	}
 	if (clear) {
 		fnClear && fnClear();
@@ -711,7 +715,16 @@ function ls(target) {
 		target = includeTargetObj;
 	}
 	// Sort all required descriptions
-	descriptions = getPropertyDescriptions( target, options, options.namePrefix || '', options.r, [], [], null);
+	descriptions = getPropertyDescriptions(
+		target,
+		options,
+		options.namePrefix || '',
+		options.r,
+		1,
+		[],
+		[],
+		null
+	);
 	descriptions.sort(sortDescriptions.bind(null, options.sort));
 
 	if (limit && limit <= options._it) {
@@ -1262,7 +1275,7 @@ ls.toBookmarklet = function(hostURL) {
 };
 
 // In case of browser start, check for args in own script src
-if (doc = global.document) {
+if (doc) {
 	var script = doc.getElementsByTagName("script"),
 		url = script.length > 0 && script[script.length - 1].src,
 		opt = url && url.split('?')[1];
