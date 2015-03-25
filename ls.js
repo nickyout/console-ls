@@ -17,7 +17,7 @@ var doc,
 	has = function(target, name) {
 		return target.hasOwnProperty(name);
 	},
-	inSequence = function(arr, val) {
+	inArray = function(arr, val) {
 		return arr.indexOf(val) !== -1;
 	},
 	merge = function(target, source) {
@@ -40,7 +40,7 @@ var doc,
 	intersection = function(arr1, arr2) {
 		var i=-1, returnArr = [];
 		while (++i < arr1.length) {
-			if (inSequence(arr2, arr1[i])) {
+			if (inArray(arr2, arr1[i])) {
 				returnArr.push(arr1[i]);
 			}
 		}
@@ -161,7 +161,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, descr, blac
 		}
 		ownerCtorName = owner && owner.constructor && owner.constructor.name || '(anonymous)';
 		kind = options.defineKind(value, name, target);
-		isCircular = inSequence(blackList, value);
+		isCircular = inArray(blackList, value);
 		previousDescrLength = descr.length;
 		entry = _createEntry(
 			namePrefix + name,
@@ -473,7 +473,7 @@ function stringify(value, options, prefix, blackList, depth) {
 			// Showing contents
 			if (isCollection(value)) {
 				// First call
-				if (inSequence(blackList, value)) {
+				if (inArray(blackList, value)) {
 					return "[Circular]";
 				}
 				blackList.push(value);
@@ -1023,7 +1023,7 @@ function _addRecursive(target, keys, arrOptions) {
 		name;
 	while (name = keys[i++]) {
 		config = lsShortcuts[name];
-		if (inSequence(arrOptions, config)) {
+		if (!inArray(arrOptions, config)) {
 			arrOptionsName = arrOptions.concat(config);
 			if (!target[name]) {
 				target[name] = lsCombo(arrOptionsName);
@@ -1111,7 +1111,7 @@ function _searchLines(lines, searchArg, index, increment, doWrap) {
 			break;
 		}
 
-		if (inSequence(lines[i], searchArg)) {
+		if (inArray(lines[i], searchArg)) {
 			return i;
 		}
 		i += increment;
@@ -1270,7 +1270,7 @@ if (doc = global.document) {
 		browserOpt = eval("(" + decodeURIComponent(opt) + ")");
 	}
 }
- 
+	 
 // Set default opt (including optional browserOpt)
 ls.setOpt();
 
