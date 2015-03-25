@@ -21,9 +21,7 @@ Use:
 var ls = require('console-ls');
 ```
 
-In the browser: there is an UMD-formatted version in `./dist/ls.js` (and minified as `./dist/ls.min.js`). If you include it as script, you should get it at `window.ls`. UMD means you can use it as module in require-js, CommonJS, pretty much any module manager.
-
-// TODO: Include literal examples
+In the browser: there is an UMD-formatted version in `./dist/ls.js` (and minified as `./dist/ls.min.js`). If you include it as script, you should get it at `window.ls`. UMD means you can use it as module in require-js, CommonJS, pretty much any module manager. Thanks, browserify.
 
 ## Quick tour:
 Here's an impression of what console-ls can do, illustrated with its console barfs.  Assume it is loaded under the variable `ls`.
@@ -39,7 +37,6 @@ method  |a       |function(target)
 method  |cat     |function(value)
 method  |doc     |function(target)
 method  |find    |function(target)
-method  |jsonPath|function(target)
 method  |q       |function(action, fromRow)
 method  |rgrep   |function(target)
 method  |setOpt  |function(opt)
@@ -171,7 +168,7 @@ Yup. `SIGINT` is in `module.exports.REPLServer` alright.
 
 ## API methods
 
-Listing methods:
+### Listing methods:
 
 *   `ls(target[, ...options])` - List the properties of `target` using the given `options`. Excludes private properties (=name starting with `_`) by default.
 *   `ls.a(target[, ...options])` - List properties including private properties.
@@ -180,14 +177,50 @@ Listing methods:
 *   `ls.rgrep(target[, ...options])` - Recursively barfs every property path of `target` as well as its full value onto a single line - excluding objects and arrays that are already being recursed through (trust me, this is NOT funny otherwise).
 *   `ls.a.doc.find.rgrep(target[, ...options])` - ...and any subset, in any order. Their behaviors stack/overwrite in order of appearance.
 
-Special methods:
+### Special methods:
 
 *   `ls.cat(target)` - Output the target as string. Objects|Arrays will look like JSON, functions will be shown with their bodies.
 *   `ls.q([action][, fromRow])` - Navigate the last output (if `option.buffer.enabled` is `true`).
-*   `ls.setOpt([...options])` - Set new default options based on the standard default options. No arguments means resetting to the standard default options.
+*   `ls.setOpt([...options])` - Set new default options based on the standard default options. No arguments means resetting to the standard default options. Returns `ls`.
 *   `ls._add(name, options)` - Define new (chainable) listing method. Rejects overwrites.
 
-## Listing options
+### Examples with shortcuts:
+
+*   `ls(target, 2)` - list (kind, name, value) with recursion depth of 2
+*   `ls(target, 0)` - list (kind, name, value) with exhaustive recursion
+*   `ls(target, 2, "string")` - list (kind, name, value) with recursion depth of 2 and filter on lines that contain the word `string`
+*   `ls.a(target, 2, "string")` - list (kind, name, value) including private properties, with recursion depth of 2 and filter on lines that contain the word `string`
+*   `ls.find(target, "string")` - list (name) with exhaustive recursion and filter on lines that contain the word `string`
+*   `ls.find(target, 2, "string")` - list (name) with recursion depth of 2 and filter on lines that contain the word `string`
+*   `ls.rgrep(target, 2, "string")` - list (name, full value) with recursion depth of 2 and filter on lines that contain the word `string`
+*   `ls.rgrep(target, { show: "value", filter: { type: "Function" } })` - list (full value) with exhaustive recursion and filter on value type being `Function`
+
+## The buffer (ls.q)
+When __options.buffer.enabled__ is set, the last output of _any listing method_ or `ls.cat()` gets stored. You can view this buffer using __ls.q()__. You essentially move a cursor to a certain line of text inside the buffer and the resulting output is centered on that line.
+
+### Invocation
+The invocation is `ls.q([action][, fromRow])`, with the arguments used as follows:
+
+#### action
+Type: `Number|String|RegExp` Default: `0`
+
+If `Number`, the index is moved by the given value (positive is downward). If `String` or `RegExp`, the index is moved downwards until it reaches a line that yields a match, or it reaches the starting line.
+
+#### fromRow
+Type: `Number` Default: `undefined`
+
+If `Number`, the index is set to the given value _before_ the specified action is executed. This value always wraps, so passing `-1` will move the index to the bottom of the buffer. If `undefined`, the index is untouched.
+
+### Examples
+
+*   `ls.q()` - display buffer at the current index
+*   `ls.q(10)` - move the index 10 lines down (and display the buffer at the resulting index)
+*   `ls.q(-10)` - move the index 10 lines up
+*   `ls.q(0, -1)` - go to the last line
+*   `ls.q("match")` - find the first line that contains `match` starting at the line _after_ current index, moving down
+*   `ls.q("match", 0)` - find the first line that contains `match` starting at the first line, moving down
+
+## Options
 The total number of options is outrageous and can be passed on every listing method call. In practice, you will be mostly using shorthands and (configurable) defaults.
 
 The options that are used for a list method call is defined as follows:
@@ -233,7 +266,7 @@ Type: `String|Array` Default: `["-kind", "name", "value"]`
 What columns to sort the output on. Names are the same as __options.show__. Always alphabetically. Preceding the name with `-` reverses the sort. Passing a string instead of an array becomes the single column to sort on.
 
 #### options.maxHeight
-Type: `Number` Default: `0`
+Type: `Number` Default: `1000`
 
 Limits number of output lines. If the limit gets exceeded, the output is ended with a line saying which lines you are viewing out of the total number of lines. If `0`, there is no limit and everything gets barfed.
 
@@ -293,17 +326,73 @@ Enforces maximum number of characters to display any value, regardless of their 
 Keep in mind that value chopping occurs _before_ filtering at the moment. You can no longer search for something that has been chopped...
 
 #### options.buffer
-Type: `Object`
+Type: `Object|Boolean` Default: `{..}`
 
-(WIP)
+Contains properties that dictate the behavior of the buffer. If not an `Object`, the value is set as __options.buffer.enabled__.
+
+#### options.buffer.enabled
+Type: `Boolean` Default: `true`
+
+If `true`, the last output gets stored and can be retrieved through __ls.q()__. If `false`, no output gets stored.
+
+#### options.buffer.maxWidth
+Type: `Number` Default: `133`
+
+Defines the maximum display width in characters when using __ls.q()__. When set to `undefined`, the value of __options.maxWidth__ gets used instead.
+
+#### options.buffer.maxHeight
+Type: `Number` Default: `40`
+
+Defines the maximum display height in rows when using __ls.q()__. When set to `undefined`, the value of __options.maxHeight__ gets used instead.
+
+#### options.buffer.clear
+Type: `Boolean` Default: `true`
+
+Dictates whether or not the console should be cleared before __ls.q()__ is used. If set to `undefined`, the value of __options.clear__ is used. If __options.fnClear__ is not set, this setting does nothing.
+
+#### options.buffer.wrap
+Type: `Boolean` Default: `true`
+
+Dictates whether relative navigation through __ls.q()__ should continue at the opposite end of the buffer when it meets the beginning or end of the buffer.
 
 #### options.quiet
 Type: `Boolean` Default: `false`
 
 Whether or not to show informative strings, like column labels and line truncating notifications (see __options.maxWidth__). Not sure if it is going to be useful unless console-ls is going to be plugged into a bigger system.
 
-## The buffer (ls.q)
-(WIP)
+#### options.clear
+Type: `Boolean` Default: `false`
+
+Whether or not to clear the console before _any_ logging. If __options.fnClear__ is not set, this setting does nothing.
+
+#### options.iterationLimit
+Type: `Number` Default: `100000`
+
+Oops, that exhaustive recursion found more than you expected, and now your console is locked up for several seconds. Use this number to limit the maximum amount of total iterations, as in, maximum number of properties to read. When this maximum is reached, the last line of the output will be a message mentioning this. If `0`, no limit is enforced.
+
+#### options.fnLog
+Type: `Function` Default: `console.log.bind(console)`
+
+The central log function used to output all logging. Output occurs as a single string containing all lines for a given output.
+
+#### options.fnClear
+Type: `Function` Default: `console.clear && console.clear.bind(console)`
+
+The central clear function used when a console clear gets requested. Optional, this does nothing in node.js.
+
+#### options.defineKind
+Type: `Function` Default: `function(value, name, source){...}`
+
+By default, the `kind` of property is derived by the value's typeof and its property name, and can be one of `class` (function, property in caps), `method` (function) or `property` (anything else). If you want something else, set this property with your own function.
+
+Expect the arguments: `value` (the property value), `name` (the direct name of the property on the instance on which it was found) and `source` (the instance on which it was found).
+
+#### options.definePrivate
+Type: `Function` Default: `function(value, name, source){...}`
+
+By default, a property is marked as private when its name starts with an `_`, or has a parent that is private. The fact that `_` means private is defined here. If you want it to be something else, set property this with your own method to dictate what else this is supposed to be.
+
+Expect the arguments: `value` (the property value), `name` (the direct name of the property on the instance on which it was found) and `source` (the instance on which it was found).
 
 ## What? No unit tests?
 Yeah. At the time of writing, this thing is still pretty new. The development was pretty much an iterative process where the best implementation for aesthetics and convenience were often in flux. In fact, if you have an idea on how the API can be improved in someway, explain me the hows and whys and I'll discuss them.
