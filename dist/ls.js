@@ -1265,7 +1265,7 @@ ls.toURL = function(hostURL) {
  * Only use onload, ls is not IE8-compliant anyway, and:
  * https://pie.gd/test/script-link-events/
  */
-var fnBookmarklet = function(){var d=document,s=d.createElement("script");s.onload=function(){ls.opt.fnLog("Loaded console-ls")};s.src="[url]";d.body.appendChild(s)};
+var fnBookmarklet = function(){var d=document,s=d.createElement("script");s.onload=function(){window.ls.opt.fnLog("Loaded console-ls")};s.src="[url]";d.body.appendChild(s)};
 
 /**
  * Double encode seems to work
