@@ -1217,11 +1217,14 @@ ls.q = bufferNavigate;
 function toURL(hostURL) {
 	hostURL || (hostURL = '');
 	var currentOpt = ls.opt,
-		defaultOpt = ls.setOpt().opt,
+		currentBrowserOpt = browserOpt,
+		defaultOpt = (browserOpt = {}) && ls.setOpt().opt,
 		optDiff = diff(defaultOpt, currentOpt),
 		argStr;
 
+	// Revert.
 	ls.opt = currentOpt;
+	browserOpt = currentBrowserOpt;
 
 	if (optDiff) {
 		argStr = "?" + enc(stringify(optDiff, {
