@@ -78,6 +78,7 @@ var regFnArgs = /(\([^)]*\))/,
 	msgMoved = "Moved to %s",
 	msgOverflow = " * Iteration limit %s reached. The rest was omitted.",
 	msgExists = "Property %s already exists",
+	msgBookmarkletFailed = "You must specify a host url",
 	allColumns = ['name','value','type','kind','depth','isPrivate','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
@@ -1272,7 +1273,13 @@ var fnBookmarklet = function(){var d=document,s=d.createElement("script");s.onlo
  * @returns {String}
  */
 ls.toBookmarklet = function(hostURL) {
-	ls.opt.fnLog('javascript:(' + enc( fnBookmarklet.toString().replace('[url]', toURL(hostURL)) ) + ')()');
+	var str = toURL(hostURL);
+	if (str[0] && str[0] !== "?") {
+		str = 'javascript:(' + enc( fnBookmarklet.toString().replace('[url]', str) ) + ')()'
+	} else {
+		str = msgBookmarkletFailed;
+	}
+	ls.opt.fnLog(str);
 };
 
 // In case of browser start, check for args in own script src
@@ -1280,7 +1287,7 @@ if (doc) {
 	var script = doc.getElementsByTagName("script"),
 		url = script.length > 0 && script[script.length - 1].src,
 		urlArgs = url && url.split('?');
-	if (urlArgs) {
+	if (/\bls(\.\w+)?\.js$/.test(urlArgs[0])) {
 		defaultHostURL = urlArgs[0];
 		if (urlArgs[1]) {
 			bookmarkletOpt = eval("(" + decodeURIComponent(urlArgs[1]) + ")");
