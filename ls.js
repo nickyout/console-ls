@@ -4,7 +4,8 @@
 
 var doc = global.document,
 	enc = encodeURIComponent,
-	browserOpt = {},
+	bookmarkletOpt = {},
+	defaultHostURL = '',
 	Obj = Object,
 	sprintf = require('tiny-sprintf/dist/sprintf.bare.min'),
 	isObject = require('lodash.isobject'),
@@ -1010,7 +1011,7 @@ ls.setOpt = function(opt) {
 			clear: true
 		}
 	};
-	defaultOptions = merge(defaultOptions, browserOpt);
+	defaultOptions = merge(defaultOptions, bookmarkletOpt);
 	ls.opt = args.length > 0 ? createOptions(defaultOptions, args, 0) : defaultOptions;
 	return ls;
 };
@@ -1228,16 +1229,16 @@ ls.q = bufferNavigate;
  * @param {String} hostURL - the url to this script
  */
 function toURL(hostURL) {
-	hostURL || (hostURL = '');
+	hostURL || (hostURL = defaultHostURL);
 	var currentOpt = ls.opt,
-		currentBrowserOpt = browserOpt,
-		defaultOpt = (browserOpt = {}) && ls.setOpt().opt,
+		currentBrowserOpt = bookmarkletOpt,
+		defaultOpt = (bookmarkletOpt = {}) && ls.setOpt().opt,
 		optDiff = diff(defaultOpt, currentOpt),
 		argStr;
 
 	// Revert.
 	ls.opt = currentOpt;
-	browserOpt = currentBrowserOpt;
+	bookmarkletOpt = currentBrowserOpt;
 
 	if (optDiff) {
 		argStr = "?" + enc(stringify(optDiff, {
@@ -1278,9 +1279,12 @@ ls.toBookmarklet = function(hostURL) {
 if (doc) {
 	var script = doc.getElementsByTagName("script"),
 		url = script.length > 0 && script[script.length - 1].src,
-		opt = url && url.split('?')[1];
-	if (opt) {
-		browserOpt = eval("(" + decodeURIComponent(opt) + ")");
+		urlArgs = url && url.split('?');
+	if (urlArgs) {
+		defaultHostURL = urlArgs[0];
+		if (urlArgs[1]) {
+			bookmarkletOpt = eval("(" + decodeURIComponent(urlArgs[1]) + ")");
+		}
 	}
 }
 	 
