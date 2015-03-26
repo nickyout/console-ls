@@ -8,20 +8,32 @@ Console-ls is a set of tools meant to inspect and search nested objects and inst
 *   Navigate and search long results
 *   Handles circular references (duh)
 *   Can be browserified (duh)
-*   Currently minified to 9K
+*   Can create its own bookmarklets that save your settings
+*   Currently minified to 11K
 *   Did I say no mouse?
 
 ## Install
-In node.js:
+
+### In node.js
 ```
 npm install console-ls --save-dev
 ```
-Use:
+...then use:
 ```
 var ls = require('console-ls');
 ```
 
-In the browser: there is an UMD-formatted version in `./dist/ls.js` (and minified as `./dist/ls.min.js`). If you include it as script, you should get it at `window.ls`. UMD means you can use it as module in require-js, CommonJS, pretty much any module manager. Thanks, browserify.
+### As bookmarklet
+
+[Bookmark this](javascript:(function%20()%7Bvar%20d%3Ddocument%2Cs%3Dd.createElement(%22script%22)%3Bs.onload%3Dfunction()%7Bwindow.ls.opt.fnLog(%22Loaded%20console-ls%22)%7D%3Bs.src%3D%22https%3A%2F%2Fcdn.rawgit.com%2Fnickyout%2Fconsole-ls%2F0.1.0%2Fdist%2Fls.min.js%22%3Bd.body.appendChild(s)%7D)())
+
+### In the browser
+There is an UMD-formatted version in `./dist/ls.js` (and minified as `./dist/ls.min.js`). If you include it as script, you should get it at `window.ls`. UMD means you can use it as module in require-js, CommonJS, pretty much any module manager. Thanks, browserify.
+
+### CDN
+Thanks to rawgit.com you can use:
+
+https://cdn.rawgit.com/nickyout/console-ls/0.1.0/dist/ls.min.js
 
 ## Quick tour:
 Here's an impression of what console-ls can do, illustrated with its console barfs.  Assume it is loaded under the variable `ls`.
@@ -176,13 +188,15 @@ Yup. `SIGINT` is in `module.exports.REPLServer` alright.
 *   `ls.find(target[, ...options])` - Recursively barfs every property path of `target`, using `"."` as default nameSep.
 *   `ls.rgrep(target[, ...options])` - Recursively barfs every property path of `target` as well as its full value onto a single line - excluding objects and arrays that are already being recursed through (trust me, this is NOT funny otherwise).
 *   `ls.a.doc.find.rgrep(target[, ...options])` - ...and any subset, in any order. Their behaviors stack/overwrite in order of appearance.
+*   `ls.cat(target)` - Output the target as string. Objects|Arrays will look like JSON, functions will be shown with their bodies.
 
 ### Special methods:
 
-*   `ls.cat(target)` - Output the target as string. Objects|Arrays will look like JSON, functions will be shown with their bodies.
 *   `ls.q([action][, fromRow])` - Navigate the last output (if `option.buffer.enabled` is `true`).
 *   `ls.setOpt([...options])` - Set new default options based on the standard default options. No arguments means resetting to the standard default options. Returns `ls`.
-*   `ls._add(name, options)` - Define new (chainable) listing method. Rejects overwrites.
+*   `ls.addShortcut(name, options)` - Define new (chainable) listing method. Rejects overwrites.
+*   `ls.toURL([hostURL])` - Create an url that has the changes to the default options embedded like a get var. If ls was loaded as bookmarklet, default hostURL will be the same url used in the bookmarklet.
+*   `ls.toBookmarklet([hostURL])` - Like toURL, but wraps the returning url into a bookmarklet. Also uses the default hostURL if set.
 
 ### Examples with shortcuts:
 
@@ -221,7 +235,7 @@ If `Number`, the index is set to the given value _before_ the specified action i
 *   `ls.q("match", 0)` - find the first line that contains `match` starting at the first line, moving down
 
 ## Options
-The total number of options is outrageous and can be passed on every listing method call. In practice, you will be mostly using shorthands and (configurable) defaults.
+The total number of options is outrageous and can be passed on every listing method call. All functions that accept an `options` argument will accept it as repeating argument and including all the same shorthands. In practice, you will be mostly using shorthands and (configurable) defaults.
 
 The options that are used for a list method call is defined as follows:
 
@@ -229,6 +243,13 @@ The options that are used for a list method call is defined as follows:
 *   Listing methods other than `ls` have their own options object that is normalized and then deep merged with this options object.
 *   Every additional `options` argument gets normalized and is then deep merged with this options object (in order)
 *   The resulting options object is used for the call.
+
+### Setting defaults
+You can set the default options in `ls.opt` by setting them directly. All possible properties are already set. If you screw up and want to revert to the default options, you can call `ls.setOpt()`. If you pass options to `ls.setOpt()`, these will be applied after the defaults are reset.
+
+When you create a bookmarklet using `ls.toBookmarklet()`, the current options in `ls.opt` are automatically embedded and loaded when you use the bookmarklet. These options will then be the default options, even for `ls.setOpt()`.
+
+### All options
 
 #### options
 Type: `Object|Number|String|RegExp` Default: `{..}`
@@ -239,7 +260,7 @@ A `Number` is shorthand for setting __options.r__. A `String` or `RegExp` is sho
 #### options.r
 Type: `Number|Boolean` Default: `1`
 
-Recursion depth. `true`, `0` or less than `0` for exhaustive recursion.
+Recursion depth. `true`, `0` or less than `0` for exhaustive recursion. Can also be set by passing a number as __options__.
 
 #### options.filter
 Type: `String|RegExp|Object` Default: `{ isPrivate: false }`
@@ -253,12 +274,12 @@ If `String`, `RegExp` or any other non-`Object`, the value becomes the filter va
 #### options.grep
 Type: `String|RegExp` Default: `''`
 
-Filters by line instead of by column. Only the lines that contain this value will be displayed. Matching occurs _before_ lines are chopped (see __options.maxWidth__).
+Filters by line instead of by column. Only the lines that contain this value will be displayed. Matching occurs _before_ lines are chopped (see __options.maxWidth__). Grep can also be set by passing a string as __options__.
 
 #### options.show
 Type: `String|Array` Default: `["kind", "name", "value"]`
 
-Which columns to show. Use the same name as shown as the label at the top of a column. A string instead of an array becomes the single column to show, unless this string is `"all"`. In this case - you guessed it - all columns are shown. Currently there are: name, value, type, kind, isPrivate, className, isCircular, lsLeaf.
+Which columns to show. Use the same name as shown as the label at the top of a column. A string instead of an array becomes the single column to show, unless this string is `"all"`. In this case - you guessed it - all columns are shown. Currently there are: name, value, type, kind, depth, isPrivate, className, isCircular, lsLeaf.
 
 #### options.sort
 Type: `String|Array` Default: `["-kind", "name", "value"]`
@@ -282,11 +303,23 @@ Whenever something gets chopped or left out, display this char. Used for choppin
 
 #### options.nameSep
 Type: `String` Default: `"."`
+
 During recursive listing, property names are displayed as paths. This character is used between the names in such a path. It's really just aesthetics.
 
 #### options.namePrefix
 Type: `String` Default: `""`
+
 Every property name gets this string before it. Aesthetics.
+
+#### options.includeTarget
+Type: `Boolean` Default: `false`
+
+If set, the target to inspect will be included in the listing as recursion level 1. If you wish to also list its direct properties, you must therefore set __options.r__ to `2`.
+
+#### options.includeTargetName
+Type: `String` Default: `[target]`
+
+The name to use for the target itself in the listing.
 
 #### options.value
 Type: `String|Object` Default: `{..}`
