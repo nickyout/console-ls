@@ -1249,7 +1249,8 @@ function toURL(hostURL) {
 				default: "large",
 				object: "large",
 				array: "large",
-				function: "large"
+				function: "large",
+				indent: ''
 			}
 		}));
 	} else {
