@@ -1,6 +1,6 @@
 {
   "name": "console-ls",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Inspect and search instances more effectively in the developer console",
   "main": "ls.js",
   "scripts": {
