@@ -25,7 +25,7 @@ var ls = require('console-ls');
 
 ### As bookmarklet
 
-[Bookmark this](javascript:(function%20()%7Bvar%20d%3Ddocument%2Cs%3Dd.createElement(%22script%22)%3Bs.onload%3Dfunction()%7Bwindow.ls.opt.fnLog(%22Loaded%20console-ls%22)%7D%3Bs.src%3D%22https%3A%2F%2Fcdn.rawgit.com%2Fnickyout%2Fconsole-ls%2F0.1.0%2Fdist%2Fls.min.js%22%3Bd.body.appendChild(s)%7D)())
+[Bookmark this][bmk]
 
 ### In the browser
 There is an UMD-formatted version in `./dist/ls.js` (and minified as `./dist/ls.min.js`). If you include it as script, you should get it at `window.ls`. UMD means you can use it as module in require-js, CommonJS, pretty much any module manager. Thanks, browserify.
@@ -433,3 +433,5 @@ Yeah. At the time of writing, this thing is still pretty new. The development wa
 Also, it's meant to be a debug tool, not production code.
 
 Poor excuses for no unit tests at all, but at the moment it's all I'm giving.
+
+[bmk]: javascript:(function%20()%7Bvar%20d%3Ddocument%2Cs%3Dd.createElement(%22script%22)%3Bs.onload%3Dfunction()%7Bwindow.ls.opt.fnLog(%22Loaded%20console-ls%22)%7D%3Bs.src%3D%22https%3A%2F%2Fcdn.rawgit.com%2Fnickyout%2Fconsole-ls%2F0.1.0%2Fdist%2Fls.min.js%22%3Bd.body.appendChild(s)%7D)()
