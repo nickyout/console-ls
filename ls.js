@@ -170,7 +170,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 		getPropertySafely(target, name);
 		if (getPropertySafeResult[0]) {
 			isError = true;
-			value = '[' + getPropertySafeResult[0].name + ']';
+			value = getPropertySafeResult[0];
 		} else {
 			isError = false;
 			value = getPropertySafeResult[1];
@@ -203,7 +203,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 			ownerDepth,
 			ownerCtorName
 		);
-		if (depth !== 1 && !isCircular) {
+		if (depth !== 1 && !isCircular && !isError) {
 			getPropertyDescriptions(
 				value,
 				options,
@@ -224,7 +224,13 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 		}
 
 		// Okay, make the string
-		entry.value = isCircular ? "[Circular]" : stringify(value, options) + '';
+		if (isCircular) {
+			entry.value = "[Circular]";
+		} else if (isError) {
+			entry.value = "[" + value + "]";
+		} else {
+			entry.value = stringify(value, options) + '';
+		}
 
 		// Option to leave out recursed entirely
 		if (filterDescription.call(options, entry)) {
