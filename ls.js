@@ -79,11 +79,12 @@ var regFnArgs = /(\([^)]*\))/,
 	msgOverflow = " * Iteration limit %s reached. The rest was omitted.",
 	msgExists = "Property %s already exists",
 	msgBookmarkletFailed = "You must specify a host url",
-	allColumns = ['name','value','type','kind','depth','isPrivate','className','isCircular', 'lsLeaf'],
+	allColumns = ['name','value','type','kind','depth','isPrivate','isOwn','throws','className','isCircular', 'lsLeaf'],
 	buffer = null,
 	bufferIndex = 0,
 	includeTargetObj = {},
 	recycledEntries = [],
+	getPropertySafeResult = [],
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
@@ -91,7 +92,7 @@ var regFnArgs = /(\([^)]*\))/,
 
 /////////////////////////////////////// core ls utils ///////////////////////////////////////
 
-function _createEntry(name, value, type, kind, depth, isPrivate, isCircular, owner, ownerDepth, ownerCtorName) {
+function _createEntry(name, value, type, kind, depth, isPrivate, isOwn, throws, isCircular, owner, ownerDepth, ownerCtorName) {
 	var val = recycledEntries.length > 0 ? recycledEntries.pop() : {};
 	val.name = name;
 	val._value = value;
@@ -101,6 +102,8 @@ function _createEntry(name, value, type, kind, depth, isPrivate, isCircular, own
 	val.depth = depth;
 	val.isPrivate = isPrivate;
 	val.isCircular = isCircular;
+	val.isOwn = isOwn;
+	val.throws = throws;
 	val.lsLeaf = false;
 	val.owner = owner;
 	val.ownerDepth = ownerDepth;
@@ -116,12 +119,24 @@ function _recycleEntry(el) {
 	}
 }
 
+function getPropertySafely(target, name) {
+	try {
+		getPropertySafeResult[0] = null;
+		getPropertySafeResult[1] = target[name];
+		return target[name];
+	} catch (err) {
+		getPropertySaferesult[1] = null;
+		getPropertySafeResult[0] = '['+err.name+']: ' + err.message;
+	}
+}
+
 /**
  *
  * @param {*} target
  * @param {Object} options
  * @param {String} namePrefix
  * @param {Number} depth
+ * @param {Number} currentDepth
  * @param {Array} descr
  * @param {Array} blackList
  * @param {?*} parent
@@ -138,6 +153,7 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 		isPrivate,
 		previousBlackListLength = blackList.length,
 		previousDescrLength,
+		isError,
 		limit = options.iterationLimit;
 
 	if (!isObject(target)) {
@@ -151,7 +167,14 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 			options._it++;
 		}
 
-		value = target[name];
+		getPropertySafely(target, name);
+		if (getPropertySafeResult[0]) {
+			isError = true;
+			value = '[' + getPropertySafeResult[0].name + ']';
+		} else {
+			isError = false;
+			value = getPropertySafeResult[1];
+		}
 		isPrivate = options.definePrivate(value, name, target);
 		if (!filterByValue.call(options, "isPrivate", isPrivate)) {
 			continue;
@@ -173,6 +196,8 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 			kind,
 			currentDepth,
 			(parent && parent.isPrivate) || isPrivate,
+			ownerDepth == 0,
+			isError,
 			isCircular,
 			owner,
 			ownerDepth,

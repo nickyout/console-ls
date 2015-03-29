@@ -9,7 +9,7 @@ Console-ls is a set of tools meant to inspect and search nested objects and inst
 *   Handles circular references (duh)
 *   Can be browserified (duh)
 *   Can create its own bookmarklets that save your settings
-*   Currently minified to 11K
+*   Currently minified to 12K
 *   Did I say no mouse?
 
 ## Install
@@ -282,7 +282,7 @@ Filters by line instead of by column. Only the lines that contain this value wil
 #### options.show
 Type: `String|Array` Default: `["kind", "name", "value"]`
 
-Which columns to show. Use the same name as shown as the label at the top of a column. A string instead of an array becomes the single column to show, unless this string is `"all"`. In this case - you guessed it - all columns are shown. Currently there are: name, value, type, kind, depth, isPrivate, className, isCircular, lsLeaf.
+Which columns to show. Use the same name as shown as the label at the top of a column. A string instead of an array becomes the single column to show, unless this string is `"all"`. In this case - you guessed it - all columns are shown. Currently there are: name, value, type, kind, depth, isPrivate, isOwn, throws, className, isCircular, lsLeaf.
 
 #### options.sort
 Type: `String|Array` Default: `["-kind", "name", "value"]`
@@ -436,5 +436,3 @@ Yeah. At the time of writing, this thing is still pretty new. The development wa
 Also, it's meant to be a debug tool, not production code.
 
 Poor excuses for no unit tests at all, but at the moment it's all I'm giving.
-
-[bmk]: 
