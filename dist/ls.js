@@ -17,6 +17,31 @@ var doc = global.document,
 	isCollection = function(val) { return isArray(val) || isPlainObject(val); },
 	typeOf = function(value) { return (Obj.prototype.toString.call(value).match(/(\w+)\]/)[1]) || ''; },
 	ObjKeys = Obj.keys.bind(Obj),
+	safelyDo = function(ctx, fn) {
+		var value = null,
+			error = null,
+			args = arguments,
+			i;
+		safelyDoArgs.length = args.length - 2;
+		for (i = 2; i < args.length; i++) {
+			safelyDoArgs[i - 2] = arguments[i];
+		}
+		try {
+			value = fn.apply(ctx, safelyDoArgs);
+		} catch (err) {
+			error = err;
+		}
+		safelyDoResponse[0] = error;
+		safelyDoResponse[1] = value;
+		return safelyDoResponse;
+	},
+	ObjInheritKeys = function(target) {
+		var arr = [];
+		for (var name in target) {
+			arr.push(name);
+		}
+		return arr;
+	},
 	has = function(target, name) {
 		return target.hasOwnProperty(name);
 	},
@@ -86,7 +111,8 @@ var regFnArgs = /(\([^)]*\))/,
 	bufferIndex = 0,
 	includeTargetObj = {},
 	recycledEntries = [],
-	getPropertySafeResult = [],
+	safelyDoArgs = [],
+	safelyDoResponse = [null, null],
 	LARGE = 'large',
 	MEDIUM = 'medium',
 	SMALL = 'small',
@@ -94,7 +120,7 @@ var regFnArgs = /(\([^)]*\))/,
 
 /////////////////////////////////////// core ls utils ///////////////////////////////////////
 
-function _createEntry(name, value, type, kind, depth, isPrivate, isOwn, throws, isCircular, owner, ownerDepth, ownerCtorName) {
+function _createEntry(name, value, type, kind, depth, isPrivate, isOwn, isCircular, owner, ownerDepth, ownerCtorName) {
 	var val = recycledEntries.length > 0 ? recycledEntries.pop() : {};
 	val.name = name;
 	val._value = value;
@@ -105,7 +131,8 @@ function _createEntry(name, value, type, kind, depth, isPrivate, isOwn, throws, 
 	val.isPrivate = isPrivate;
 	val.isCircular = isCircular;
 	val.isOwn = isOwn;
-	val.throws = throws;
+	val.throws = false;
+	val._error = null;
 	val.lsLeaf = false;
 	val.owner = owner;
 	val.ownerDepth = ownerDepth;
@@ -114,21 +141,10 @@ function _createEntry(name, value, type, kind, depth, isPrivate, isOwn, throws, 
 }
 
 function _recycleEntry(el) {
+	el.value = el._value = el.owner = el._error = null;
 	if (recycledEntries.length < 1000) {
-		el.value = el._value = el.owner = null;
 		// the rest should be ok
 		recycledEntries.push(el);
-	}
-}
-
-function getPropertySafely(target, name) {
-	try {
-		getPropertySafeResult[0] = null;
-		getPropertySafeResult[1] = target[name];
-		return target[name];
-	} catch (err) {
-		getPropertySaferesult[1] = null;
-		getPropertySafeResult[0] = '['+err.name+']: ' + err.message;
 	}
 }
 
@@ -149,34 +165,40 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 		owner,
 		ownerDepth,
 		ownerCtorName,
+		names,
+		name,
+		i,
 		kind,
 		value,
 		isCircular,
 		isPrivate,
 		previousBlackListLength = blackList.length,
 		previousDescrLength,
-		isError,
 		limit = options.iterationLimit;
 
 	if (!isObject(target)) {
 		return descr;
 	}
+	safelyDo(null, ObjInheritKeys, target);
+	if (safelyDoResponse[0]) {
+		if (parent) {
+			// Sue me
+			parent._error = safelyDoResponse[0];
+		}
+		return descr;
+	} else {
+		names = safelyDoResponse[1];
+	}
 	blackList.push(target);
-	for (var name in target) {
+	for (i = 0; i < names.length; i++) {
+		name = names[i];
 		if (limit && limit <= options._it) {
 			break;
 		} else {
 			options._it++;
 		}
 
-		getPropertySafely(target, name);
-		if (getPropertySafeResult[0]) {
-			isError = true;
-			value = '[' + getPropertySafeResult[0].name + ']';
-		} else {
-			isError = false;
-			value = getPropertySafeResult[1];
-		}
+		value = target[name];
 		isPrivate = options.definePrivate(value, name, target);
 		if (!filterByValue.call(options, "isPrivate", isPrivate)) {
 			continue;
@@ -199,7 +221,6 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 			currentDepth,
 			(parent && parent.isPrivate) || isPrivate,
 			ownerDepth == 0,
-			isError,
 			isCircular,
 			owner,
 			ownerDepth,
@@ -226,7 +247,18 @@ function getPropertyDescriptions(target, options, namePrefix, depth, currentDept
 		}
 
 		// Okay, make the string
-		entry.value = isCircular ? "[Circular]" : stringify(value, options) + '';
+		if (isCircular) {
+			entry.value = "[Circular]";
+		} else {
+			safelyDo(null, stringify, value, options);
+			if (safelyDoResponse[0]) {
+				entry._error = safelyDoResponse[0];
+				entry.value = '[' + safelyDoResponse[0].name + ']';
+			} else {
+				entry.value = safelyDoResponse[1];
+			}
+		}
+		entry.throws = !!entry._error;
 
 		// Option to leave out recursed entirely
 		if (filterDescription.call(options, entry)) {
@@ -516,7 +548,7 @@ function stringify(value, options, prefix, blackList, depth) {
 			}
 		// Fallthrough intended
 		default:
-			str = "" + value;
+			str = value  + '';
 	}
 	str = _chop(str, maxWidth, chopChar);
 	// Unless default format is large, remove newlines
@@ -793,6 +825,10 @@ function ls(target) {
 	}
 
 	// Clear immediately
+	i = 0;
+	while (el = descriptions[i++]) {
+		_recycleEntry(el);
+	}
 	descriptions.length = 0;
 
 	if (!quiet && limitReached) {
